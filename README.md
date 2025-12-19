@@ -66,6 +66,7 @@ binance-mcp-server --api-key $BINANCE_API_KEY --api-secret $BINANCE_API_SECRET -
 
 Configure your AI agent (Claude, GPT-4, or custom bot) to connect to the MCP server:
 
+**For local STDIO connection:**
 ```json
 {
   "mcpServers": {
@@ -80,11 +81,65 @@ Configure your AI agent (Claude, GPT-4, or custom bot) to connect to the MCP ser
   }
 }
 ```
+
+**For remote SSE/HTTP connection (CherryStudio, etc.):**
+```json
+{
+  "mcpServers": {
+    "binance-futures": {
+      "url": "http://your-server-ip:8000/sse",
+      "transport": "sse"
+    }
+  }
+}
+```
+
+### 5️⃣ Remote Server Deployment (SSE/HTTP)
+
+For deploying on a remote server (Ubuntu, etc.) and connecting via SSE or HTTP:
+
+```bash
+# Start server with SSE transport
+binance-mcp-server --transport sse --host 0.0.0.0 --port 8000
+
+# Or with streamable-http
+binance-mcp-server --transport streamable-http --host 0.0.0.0 --port 8000
+```
+
+**Systemd Service (Ubuntu):**
+```bash
+sudo nano /etc/systemd/system/binance-mcp.service
+```
+
+```ini
+[Unit]
+Description=Binance MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Environment="BINANCE_API_KEY=your_key"
+Environment="BINANCE_API_SECRET=your_secret"
+ExecStart=/home/ubuntu/.local/bin/binance-mcp-server --transport sse --host 0.0.0.0 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable binance-mcp
+sudo systemctl start binance-mcp
+```
+
+📖 **[Complete Deployment Guide](docs/futures-tools.md#deployment-guide)** - Nginx, Docker, SSL setup
 ## 📚 Available Tools
 
-Our MCP server provides **15 comprehensive trading tools** that enable AI agents to perform cryptocurrency trading operations. Each tool follows the Model Context Protocol standard for seamless integration.
+Our MCP server provides **30+ comprehensive trading tools** that enable AI agents to perform cryptocurrency trading operations. Each tool follows the Model Context Protocol standard for seamless integration.
 
-### 🏦 Account & Portfolio Management
+### 🏦 Account & Portfolio Management (Spot)
 | Tool | Purpose |
 |------|---------|
 | `get_balance` | Retrieve account balances for all assets |
@@ -99,7 +154,7 @@ Our MCP server provides **15 comprehensive trading tools** that enable AI agents
 | `get_ticker` | 24-hour ticker price change statistics |
 | `get_order_book` | Current order book (bids/asks) for a symbol |
 
-### 💱 Trading Operations
+### 💱 Spot Trading Operations
 | Tool | Purpose |
 |------|---------|
 | `create_order` | Create buy/sell orders (market, limit, etc.) |
@@ -122,6 +177,27 @@ Our MCP server provides **15 comprehensive trading tools** that enable AI agents
 | Tool | Purpose |
 |------|---------|
 | `get_liquidation_history` | Past liquidation events for futures trading |
+
+### ⚡ USDⓈ-M Futures Trading (BTCUSDT/ETHUSDT)
+
+| Tool | Purpose |
+|------|---------|
+| `get_exchange_info_futures` | Trading rules, tickSize, stepSize, minNotional |
+| `get_commission_rate_futures` | Maker/taker commission rates |
+| `get_position_risk_futures` | Position info, liquidation price, unrealized PnL |
+| `get_leverage_brackets_futures` | Leverage tiers and maintenance margin ratios |
+| `set_leverage_futures` | Set leverage (idempotent) |
+| `set_margin_type_futures` | Set ISOLATED or CROSSED margin (idempotent) |
+| `place_order_futures` | Place orders with auto price/qty rounding |
+| `amend_order_futures` | Modify LIMIT orders |
+| `get_order_status_futures` | Get order status with fill percentage |
+| `cancel_order_futures` | Cancel single order |
+| `cancel_multiple_orders_futures` | Batch cancel up to 10 orders |
+| `validate_order_plan_futures` | Pre-validate order plans before execution |
+| `place_bracket_orders_futures` | Entry + SL + TPs with OCO-like coordination |
+| `cancel_on_ttl_futures` | Auto-cancel unfilled orders after TTL |
+
+📖 **[Futures Tools Documentation](docs/futures-tools.md)** - Comprehensive guide with examples
 
 
 ## 🔧 Configuration

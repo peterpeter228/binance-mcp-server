@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     name="binance-mcp-server",
-    version="1.2.5",  # Updated to match pyproject.toml
+    version="1.3.0",  # Updated for futures tools
     instructions="""
     This server provides secure access to Binance cryptocurrency exchange functionality following MCP best practices.
     
@@ -39,6 +39,8 @@ mcp = FastMCP(
     - Credential protection
     
     AVAILABLE TOOLS:
+    
+    == SPOT TRADING ==
     
     Market Data:
     - get_ticker_price: Get current price for a trading symbol
@@ -67,12 +69,42 @@ mcp = FastMCP(
     Risk Management:
     - get_liquidation_history: Get liquidation history for futures trading
     
-    All operations implement:
-    - Comprehensive input validation
-    - Rate limiting to respect Binance API limits
-    - Secure error handling
-    - Audit logging for security monitoring
-    - Proper configuration management
+    == USDⓈ-M FUTURES TRADING (BTCUSDT/ETHUSDT) ==
+    
+    Exchange Info & Validation:
+    - get_exchange_info_futures: Get trading rules, tickSize, stepSize, minNotional
+    - get_commission_rate_futures: Get maker/taker commission rates
+    - validate_order_plan_futures: Pre-validate order plans before execution
+    
+    Position & Risk:
+    - get_position_risk_futures: Get position info, liquidation price, unrealized PnL
+    - get_leverage_brackets_futures: Get leverage tiers and maintenance margin ratios
+    
+    Account Settings:
+    - set_leverage_futures: Set leverage (idempotent)
+    - set_margin_type_futures: Set ISOLATED or CROSSED margin (idempotent)
+    
+    Order Management:
+    - place_order_futures: Place orders with auto price/qty rounding
+    - amend_order_futures: Modify LIMIT orders
+    - get_order_status_futures: Get order status
+    - cancel_order_futures: Cancel single order
+    - cancel_multiple_orders_futures: Batch cancel up to 10 orders
+    
+    Advanced Order Tools:
+    - place_bracket_orders_futures: Entry + SL + TPs with OCO-like coordination
+    - get_bracket_job_status: Track bracket order jobs
+    - cancel_bracket_job: Cancel bracket and all associated orders
+    - cancel_on_ttl_futures: Auto-cancel unfilled orders after TTL
+    - get_ttl_job_status: Track TTL cancellation jobs
+    - cancel_ttl_job: Cancel pending TTL job
+    
+    All futures tools:
+    - Auto-validate against exchange filters (tickSize, stepSize, minNotional)
+    - Round prices/quantities to valid precision
+    - Handle server time sync and -1021 errors
+    - Return both raw_response and normalized_fields
+    - Support testnet via BINANCE_TESTNET=true
     
     Tools are implemented in dedicated modules following security best practices.
     """
@@ -625,6 +657,739 @@ def get_order_book(symbol: str, limit: Optional[int] = None) -> Dict[str, Any]:
                 "message": f"Tool execution failed: {str(e)}"
             }
         }
+
+
+# ============================================================================
+# USDⓈ-M FUTURES TOOLS
+# These tools provide comprehensive access to Binance USDⓈ-M Futures trading
+# for BTCUSDT and ETHUSDT perpetual contracts.
+# ============================================================================
+
+
+@mcp.tool()
+def get_exchange_info_futures(symbol: str) -> Dict[str, Any]:
+    """
+    Get exchange information for a USDⓈ-M Futures symbol.
+    
+    Retrieves trading rules, filters, and precision settings essential for
+    order validation and price/quantity rounding.
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        
+    Returns:
+        Dictionary containing tickSize, stepSize, minQty, minNotional, 
+        pricePrecision, qtyPrecision, maxLeverage, filters, and serverTime.
+    """
+    logger.info(f"Tool called: get_exchange_info_futures with symbol={symbol}")
+    
+    try:
+        from binance_mcp_server.tools.futures import get_exchange_info_futures as _get_exchange_info_futures
+        result = _get_exchange_info_futures(symbol)
+        
+        if result.get("success"):
+            logger.info(f"Successfully fetched futures exchange info for {symbol}")
+        else:
+            logger.warning(f"Failed to fetch futures exchange info: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in get_exchange_info_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def get_commission_rate_futures(symbol: str) -> Dict[str, Any]:
+    """
+    Get user's commission rate for a USDⓈ-M Futures symbol.
+    
+    Retrieves maker and taker commission rates for accurate trading cost calculation.
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        
+    Returns:
+        Dictionary containing makerCommissionRate, takerCommissionRate with
+        both string and float values, plus percentage representations.
+    """
+    logger.info(f"Tool called: get_commission_rate_futures with symbol={symbol}")
+    
+    try:
+        from binance_mcp_server.tools.futures import get_commission_rate_futures as _get_commission_rate_futures
+        result = _get_commission_rate_futures(symbol)
+        
+        if result.get("success"):
+            logger.info(f"Successfully fetched commission rate for {symbol}")
+        else:
+            logger.warning(f"Failed to fetch commission rate: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in get_commission_rate_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def get_position_risk_futures(symbol: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get position risk information for USDⓈ-M Futures.
+    
+    Retrieves comprehensive position information including position size,
+    entry price, mark price, liquidation price, leverage, margin, and unrealized PnL.
+    
+    Args:
+        symbol: Optional trading pair symbol (BTCUSDT or ETHUSDT).
+                If not provided, returns positions for all allowed symbols.
+        
+    Returns:
+        Dictionary containing position data with normalized fields for easy access.
+    """
+    logger.info(f"Tool called: get_position_risk_futures with symbol={symbol}")
+    
+    try:
+        from binance_mcp_server.tools.futures import get_position_risk as _get_position_risk
+        result = _get_position_risk(symbol)
+        
+        if result.get("success"):
+            logger.info(f"Successfully fetched position risk for {symbol if symbol else 'all symbols'}")
+        else:
+            logger.warning(f"Failed to fetch position risk: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in get_position_risk_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def get_leverage_brackets_futures(
+    symbol: Optional[str] = None,
+    notional_for_mmr: Optional[float] = None
+) -> Dict[str, Any]:
+    """
+    Get leverage brackets for USDⓈ-M Futures symbol(s).
+    
+    Retrieves notional value tiers with max leverage and maintenance margin ratios.
+    Essential for calculating liquidation price and margin requirements.
+    
+    Args:
+        symbol: Optional trading pair symbol (BTCUSDT or ETHUSDT).
+        notional_for_mmr: Optional notional value to calculate specific MMR for.
+        
+    Returns:
+        Dictionary containing brackets organized by symbol, with maxLeverage,
+        maintMarginRatio, and optional mmr_for_notional calculation.
+    """
+    logger.info(f"Tool called: get_leverage_brackets_futures with symbol={symbol}")
+    
+    try:
+        from binance_mcp_server.tools.futures import get_leverage_brackets as _get_leverage_brackets
+        result = _get_leverage_brackets(symbol, notional_for_mmr)
+        
+        if result.get("success"):
+            logger.info(f"Successfully fetched leverage brackets for {symbol if symbol else 'all symbols'}")
+        else:
+            logger.warning(f"Failed to fetch leverage brackets: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in get_leverage_brackets_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def set_leverage_futures(symbol: str, leverage: int) -> Dict[str, Any]:
+    """
+    Set leverage for a USDⓈ-M Futures symbol.
+    
+    Changes the leverage multiplier. Idempotent - returns success with
+    already_set=true if leverage is already at requested value.
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        leverage: Target leverage (1-125 for BTC, varies by symbol)
+        
+    Returns:
+        Dictionary containing leverage setting result and maxNotionalValue.
+    """
+    logger.info(f"Tool called: set_leverage_futures with symbol={symbol}, leverage={leverage}")
+    
+    try:
+        from binance_mcp_server.tools.futures import set_leverage as _set_leverage
+        result = _set_leverage(symbol, leverage)
+        
+        if result.get("success"):
+            logger.info(f"Successfully set leverage for {symbol} to {leverage}x")
+        else:
+            logger.warning(f"Failed to set leverage: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in set_leverage_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def set_margin_type_futures(symbol: str, margin_type: str) -> Dict[str, Any]:
+    """
+    Set margin type for a USDⓈ-M Futures symbol.
+    
+    Changes between isolated and cross margin modes. Idempotent - returns
+    success with already_set=true if margin type is already set.
+    Note: Cannot change with open positions.
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        margin_type: "ISOLATED" or "CROSSED"
+        
+    Returns:
+        Dictionary containing margin type setting result.
+    """
+    logger.info(f"Tool called: set_margin_type_futures with symbol={symbol}, margin_type={margin_type}")
+    
+    try:
+        from binance_mcp_server.tools.futures import set_margin_type as _set_margin_type
+        result = _set_margin_type(symbol, margin_type)
+        
+        if result.get("success"):
+            logger.info(f"Successfully set margin type for {symbol} to {margin_type}")
+        else:
+            logger.warning(f"Failed to set margin type: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in set_margin_type_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def place_order_futures(
+    symbol: str,
+    side: str,
+    order_type: str,
+    quantity: Optional[float] = None,
+    price: Optional[float] = None,
+    stop_price: Optional[float] = None,
+    time_in_force: Optional[str] = None,
+    reduce_only: Optional[bool] = None,
+    close_position: Optional[bool] = None,
+    position_side: Optional[str] = None,
+    working_type: Optional[str] = None,
+    post_only: Optional[bool] = None,
+    client_order_id: Optional[str] = None,
+    callback_rate: Optional[float] = None,
+    activation_price: Optional[float] = None,
+    price_protect: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """
+    Place a new order for USDⓈ-M Futures.
+    
+    Creates a futures order with automatic validation against exchange filters
+    (tickSize, stepSize, minNotional) before submission.
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        side: "BUY" or "SELL"
+        order_type: LIMIT, MARKET, STOP, STOP_MARKET, TAKE_PROFIT, 
+                   TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET
+        quantity: Order quantity (required unless closePosition=true)
+        price: Limit price (required for LIMIT, STOP, TAKE_PROFIT)
+        stop_price: Stop/trigger price (for STOP/TAKE_PROFIT types)
+        time_in_force: GTC, IOC, FOK, or GTX (GTX = post-only)
+        reduce_only: If true, can only reduce position
+        close_position: If true, close entire position
+        position_side: BOTH, LONG, or SHORT (for hedge mode)
+        working_type: MARK_PRICE or CONTRACT_PRICE (for stop orders)
+        post_only: If true, sets timeInForce=GTX
+        client_order_id: Custom order ID
+        callback_rate: Callback rate for trailing stop (1-5%)
+        activation_price: Activation price for trailing stop
+        price_protect: Enable price protection for stop orders
+        
+    Returns:
+        Dictionary containing order details and validation information.
+    """
+    logger.info(f"Tool called: place_order_futures with symbol={symbol}, side={side}, type={order_type}")
+    
+    try:
+        from binance_mcp_server.tools.futures import place_order_futures as _place_order_futures
+        result = _place_order_futures(
+            symbol=symbol,
+            side=side,
+            order_type=order_type,
+            quantity=quantity,
+            price=price,
+            stop_price=stop_price,
+            time_in_force=time_in_force,
+            reduce_only=reduce_only,
+            close_position=close_position,
+            position_side=position_side,
+            working_type=working_type,
+            post_only=post_only,
+            client_order_id=client_order_id,
+            callback_rate=callback_rate,
+            activation_price=activation_price,
+            price_protect=price_protect,
+        )
+        
+        if result.get("success"):
+            logger.info(f"Successfully placed futures order for {symbol}")
+        else:
+            logger.warning(f"Failed to place futures order: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in place_order_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def amend_order_futures(
+    symbol: str,
+    order_id: Optional[int] = None,
+    orig_client_order_id: Optional[str] = None,
+    price: Optional[float] = None,
+    quantity: Optional[float] = None,
+    side: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Amend/modify an existing LIMIT order for USDⓈ-M Futures.
+    
+    Modifies price and/or quantity of an existing LIMIT order.
+    Note: Only LIMIT orders can be modified.
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        order_id: Order ID to modify
+        orig_client_order_id: Client order ID to modify
+        price: New price (optional)
+        quantity: New quantity (optional)
+        side: Order side BUY/SELL (required)
+        
+    Returns:
+        Dictionary containing modified order information.
+    """
+    logger.info(f"Tool called: amend_order_futures with symbol={symbol}, orderId={order_id}")
+    
+    try:
+        from binance_mcp_server.tools.futures import amend_order_futures as _amend_order_futures
+        result = _amend_order_futures(
+            symbol=symbol,
+            order_id=order_id,
+            orig_client_order_id=orig_client_order_id,
+            price=price,
+            quantity=quantity,
+            side=side,
+        )
+        
+        if result.get("success"):
+            logger.info(f"Successfully amended futures order for {symbol}")
+        else:
+            logger.warning(f"Failed to amend futures order: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in amend_order_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def get_order_status_futures(
+    symbol: str,
+    order_id: Optional[int] = None,
+    orig_client_order_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Get the status of an order for USDⓈ-M Futures.
+    
+    Retrieves detailed information about a specific order including status,
+    filled quantity, and execution details.
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        order_id: Order ID (either this or orig_client_order_id required)
+        orig_client_order_id: Client order ID
+        
+    Returns:
+        Dictionary containing order status with computed fields like
+        isFilled, isActive, fillPercentage.
+    """
+    logger.info(f"Tool called: get_order_status_futures with symbol={symbol}, orderId={order_id}")
+    
+    try:
+        from binance_mcp_server.tools.futures import get_order_status_futures as _get_order_status_futures
+        result = _get_order_status_futures(
+            symbol=symbol,
+            order_id=order_id,
+            orig_client_order_id=orig_client_order_id,
+        )
+        
+        if result.get("success"):
+            logger.info(f"Successfully fetched order status for {symbol}")
+        else:
+            logger.warning(f"Failed to fetch order status: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in get_order_status_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def cancel_order_futures(
+    symbol: str,
+    order_id: Optional[int] = None,
+    orig_client_order_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Cancel an open order for USDⓈ-M Futures.
+    
+    Cancels a single open order by orderId or clientOrderId.
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        order_id: Order ID to cancel
+        orig_client_order_id: Client order ID to cancel
+        
+    Returns:
+        Dictionary containing cancelled order information.
+    """
+    logger.info(f"Tool called: cancel_order_futures with symbol={symbol}, orderId={order_id}")
+    
+    try:
+        from binance_mcp_server.tools.futures import cancel_order_futures as _cancel_order_futures
+        result = _cancel_order_futures(
+            symbol=symbol,
+            order_id=order_id,
+            orig_client_order_id=orig_client_order_id,
+        )
+        
+        if result.get("success"):
+            logger.info(f"Successfully cancelled futures order for {symbol}")
+        else:
+            logger.warning(f"Failed to cancel futures order: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in cancel_order_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def cancel_multiple_orders_futures(
+    symbol: str,
+    order_id_list: Optional[list] = None,
+    orig_client_order_id_list: Optional[list] = None,
+) -> Dict[str, Any]:
+    """
+    Cancel multiple open orders for USDⓈ-M Futures in a single request.
+    
+    Cancels up to 10 orders in a batch. Provide either orderIdList or
+    origClientOrderIdList (not both).
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        order_id_list: List of order IDs to cancel (max 10)
+        orig_client_order_id_list: List of client order IDs to cancel (max 10)
+        
+    Returns:
+        Dictionary containing summary and details of cancelled/failed orders.
+    """
+    logger.info(f"Tool called: cancel_multiple_orders_futures with symbol={symbol}")
+    
+    try:
+        from binance_mcp_server.tools.futures import cancel_multiple_orders_futures as _cancel_multiple_orders_futures
+        result = _cancel_multiple_orders_futures(
+            symbol=symbol,
+            order_id_list=order_id_list,
+            orig_client_order_id_list=orig_client_order_id_list,
+        )
+        
+        if result.get("success"):
+            data = result.get("data", {})
+            logger.info(f"Batch cancel: {data.get('successCount', 0)} succeeded, {data.get('failedCount', 0)} failed")
+        else:
+            logger.warning(f"Failed batch cancel: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in cancel_multiple_orders_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def validate_order_plan_futures(
+    symbol: str,
+    side: str,
+    entry_price: float,
+    quantity: float,
+    stop_loss: Optional[float] = None,
+    take_profits: Optional[list] = None,
+    post_only: bool = False,
+    leverage: Optional[int] = None,
+    margin_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Validate an order plan against exchange filters before execution.
+    
+    Pre-validates a trading plan (entry + SL + TPs) against exchange rules,
+    returning rounded values and potential issues.
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        side: Order side (BUY or SELL)
+        entry_price: Intended entry price
+        quantity: Order quantity
+        stop_loss: Optional stop loss price
+        take_profits: Optional list of TP specs [{price, quantity or percentage}]
+        post_only: Whether entry should be post-only
+        leverage: Intended leverage (for validation)
+        margin_type: Intended margin type (ISOLATED/CROSSED)
+        
+    Returns:
+        Dictionary containing validation result, rounded values, issues, and fixes.
+    """
+    logger.info(f"Tool called: validate_order_plan_futures with symbol={symbol}")
+    
+    try:
+        from binance_mcp_server.tools.futures import validate_order_plan_futures as _validate_order_plan_futures
+        result = _validate_order_plan_futures(
+            symbol=symbol,
+            side=side,
+            entry_price=entry_price,
+            quantity=quantity,
+            stop_loss=stop_loss,
+            take_profits=take_profits,
+            post_only=post_only,
+            leverage=leverage,
+            margin_type=margin_type,
+        )
+        
+        valid = result.get("valid", False)
+        logger.info(f"Order plan validation for {symbol}: {'valid' if valid else 'invalid'}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in validate_order_plan_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def place_bracket_orders_futures(
+    symbol: str,
+    side: str,
+    entry_price: float,
+    quantity: float,
+    stop_loss_price: Optional[float] = None,
+    take_profits: Optional[list] = None,
+    entry_type: str = "LIMIT",
+    time_in_force: str = "GTC",
+    post_only: bool = False,
+    reduce_only: bool = False,
+    working_type: str = "CONTRACT_PRICE",
+    wait_for_entry: bool = True,
+) -> Dict[str, Any]:
+    """
+    Place a complete bracket order: entry + stop loss + take profits.
+    
+    Orchestrates placement of entry with coordinated exit orders.
+    Handles reduceOnly timing and implements OCO-like behavior.
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        side: Entry side (BUY for long, SELL for short)
+        entry_price: Entry limit price
+        quantity: Total position quantity
+        stop_loss_price: Stop loss trigger price
+        take_profits: List of TP specs [{price, quantity or percentage}]
+        entry_type: "LIMIT" or "MARKET"
+        time_in_force: "GTC", "IOC", "FOK", or "GTX"
+        post_only: If true, uses GTX for entry
+        reduce_only: If true, entry is reduceOnly
+        working_type: "MARK_PRICE" or "CONTRACT_PRICE" for exits
+        wait_for_entry: If true, waits for entry fill before placing exits
+        
+    Returns:
+        Dictionary containing job_id for tracking and order details.
+    """
+    logger.info(f"Tool called: place_bracket_orders_futures with symbol={symbol}, side={side}")
+    
+    try:
+        from binance_mcp_server.tools.futures import place_bracket_orders_futures as _place_bracket_orders_futures
+        result = _place_bracket_orders_futures(
+            symbol=symbol,
+            side=side,
+            entry_price=entry_price,
+            quantity=quantity,
+            stop_loss_price=stop_loss_price,
+            take_profits=take_profits,
+            entry_type=entry_type,
+            time_in_force=time_in_force,
+            post_only=post_only,
+            reduce_only=reduce_only,
+            working_type=working_type,
+            wait_for_entry=wait_for_entry,
+        )
+        
+        if result.get("success"):
+            logger.info(f"Successfully initiated bracket order for {symbol}")
+        else:
+            logger.warning(f"Failed bracket order: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in place_bracket_orders_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def get_bracket_job_status(job_id: str) -> Dict[str, Any]:
+    """
+    Get the status of a bracket order job.
+    
+    Args:
+        job_id: The job ID returned from place_bracket_orders_futures
+        
+    Returns:
+        Dictionary containing job status and order details.
+    """
+    logger.info(f"Tool called: get_bracket_job_status with job_id={job_id}")
+    
+    try:
+        from binance_mcp_server.tools.futures.bracket_orders import get_bracket_job_status as _get_bracket_job_status
+        return _get_bracket_job_status(job_id)
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in get_bracket_job_status tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def cancel_bracket_job(job_id: str) -> Dict[str, Any]:
+    """
+    Cancel a bracket order job and its associated orders.
+    
+    Args:
+        job_id: The job ID to cancel
+        
+    Returns:
+        Dictionary with cancellation results.
+    """
+    logger.info(f"Tool called: cancel_bracket_job with job_id={job_id}")
+    
+    try:
+        from binance_mcp_server.tools.futures.bracket_orders import cancel_bracket_job as _cancel_bracket_job
+        return _cancel_bracket_job(job_id)
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in cancel_bracket_job tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def cancel_on_ttl_futures(
+    symbol: str,
+    order_id: Optional[int] = None,
+    orig_client_order_id: Optional[str] = None,
+    ttl_seconds: float = 60,
+    blocking: bool = False,
+) -> Dict[str, Any]:
+    """
+    Cancel an order after a time-to-live period expires.
+    
+    Schedules order cancellation after TTL. If order fills before TTL,
+    no cancellation is attempted.
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT only)
+        order_id: Order ID to cancel
+        orig_client_order_id: Client order ID to cancel
+        ttl_seconds: Time to wait before cancelling (max: 600)
+        blocking: If true, waits for TTL and returns final result
+        
+    Returns:
+        For non-blocking: job_id to track cancellation
+        For blocking: final order status after TTL
+    """
+    logger.info(f"Tool called: cancel_on_ttl_futures with symbol={symbol}, ttl={ttl_seconds}s")
+    
+    try:
+        from binance_mcp_server.tools.futures import cancel_on_ttl as _cancel_on_ttl
+        result = _cancel_on_ttl(
+            symbol=symbol,
+            order_id=order_id,
+            orig_client_order_id=orig_client_order_id,
+            ttl_seconds=ttl_seconds,
+            blocking=blocking,
+        )
+        
+        if result.get("success"):
+            logger.info(f"TTL cancellation initiated for {symbol}")
+        else:
+            logger.warning(f"TTL cancellation failed: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in cancel_on_ttl_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def get_ttl_job_status(job_id: str) -> Dict[str, Any]:
+    """
+    Get the status of a TTL cancellation job.
+    
+    Args:
+        job_id: The job ID returned from cancel_on_ttl_futures
+        
+    Returns:
+        Dictionary containing job status and result if completed.
+    """
+    logger.info(f"Tool called: get_ttl_job_status with job_id={job_id}")
+    
+    try:
+        from binance_mcp_server.tools.futures.cancel_on_ttl import get_ttl_job_status as _get_ttl_job_status
+        return _get_ttl_job_status(job_id)
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in get_ttl_job_status tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def cancel_ttl_job(job_id: str) -> Dict[str, Any]:
+    """
+    Cancel a pending TTL job before it executes.
+    
+    Args:
+        job_id: The job ID to cancel
+        
+    Returns:
+        Dictionary confirming cancellation.
+    """
+    logger.info(f"Tool called: cancel_ttl_job with job_id={job_id}")
+    
+    try:
+        from binance_mcp_server.tools.futures.cancel_on_ttl import cancel_ttl_job as _cancel_ttl_job
+        return _cancel_ttl_job(job_id)
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in cancel_ttl_job tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
 
 
 
