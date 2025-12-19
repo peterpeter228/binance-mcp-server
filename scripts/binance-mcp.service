@@ -1,0 +1,36 @@
+[Unit]
+Description=Binance MCP Server (Microstructure Analysis)
+Documentation=https://github.com/AnalyticAce/binance-mcp-server
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu
+
+# 环境变量配置 - 请替换为您的真实 API 密钥
+Environment="BINANCE_API_KEY=your_api_key_here"
+Environment="BINANCE_API_SECRET=your_api_secret_here"
+# 可选：使用测试网
+# Environment="BINANCE_TESTNET=true"
+
+# 启动命令 - SSE 传输，端口 8003
+ExecStart=/home/ubuntu/.local/bin/binance-mcp-server --transport sse --host 0.0.0.0 --port 8003
+
+# 重启策略
+Restart=always
+RestartSec=5
+
+# 日志配置
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=binance-mcp
+
+# 安全加固
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

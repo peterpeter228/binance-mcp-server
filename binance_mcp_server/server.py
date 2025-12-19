@@ -99,6 +99,26 @@ mcp = FastMCP(
     - get_ttl_job_status: Track TTL cancellation jobs
     - cancel_ttl_job: Cancel pending TTL job
     
+    == MICROSTRUCTURE ANALYSIS (TOKEN-EFFICIENT) ==
+    
+    These tools provide compact market microstructure summaries designed for
+    LLM context efficiency (< 2KB output). They eliminate the need for LLMs
+    to fetch raw data and write calculation code.
+    
+    - microstructure_snapshot: Compact market structure analysis including:
+      * Orderbook imbalance (OBI) with mean/stdev across snapshots
+      * Wall detection with persistence scoring
+      * Trade flow analysis (taker imbalance)
+      * Slippage estimates (p50/p95)
+      * Micro health score (0-100)
+      * Wall risk level (spoofing/manipulation detection)
+    
+    - expected_move: Realized volatility and expected price movement
+      * Annualized RV calculation
+      * Expected move in points and bps for given horizon
+      * Confidence scoring
+      * No raw OHLCV data returned
+    
     All futures tools:
     - Auto-validate against exchange filters (tickSize, stepSize, minNotional)
     - Round prices/quantities to valid precision
@@ -1391,6 +1411,130 @@ def cancel_ttl_job(job_id: str) -> Dict[str, Any]:
         logger.error(f"Unexpected error in cancel_ttl_job tool: {str(e)}")
         return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
 
+
+# ============================================================================
+# MICROSTRUCTURE ANALYSIS TOOLS
+# Token-efficient market microstructure analysis for LLM trading systems.
+# Designed to reduce context length and provide compact, actionable summaries.
+# ============================================================================
+
+
+@mcp.tool()
+def microstructure_snapshot(
+    symbol: str,
+    depth_levels: int = 20,
+    snapshots: int = 3,
+    spacing_ms: int = 2000,
+    trades_limit: int = 300
+) -> Dict[str, Any]:
+    """
+    Get a compact microstructure snapshot for USDⓈ-M Futures.
+    
+    Provides token-efficient market structure analysis including orderbook
+    imbalance, wall detection, trade flow, slippage estimates, and health metrics.
+    Output is designed to be <= 2KB for LLM context efficiency.
+    
+    This tool eliminates the need for LLMs to fetch raw orderbook/trades and
+    write calculation code - all analysis is done server-side.
+    
+    Args:
+        symbol: Trading symbol (BTCUSDT or ETHUSDT only)
+        depth_levels: Number of orderbook levels per side (5-100, default: 20)
+        snapshots: Number of OB snapshots for OBI mean/stdev (1-10, default: 3)
+        spacing_ms: Milliseconds between snapshots (100-10000, default: 2000)
+        trades_limit: Recent trades to analyze (50-1000, default: 300)
+        
+    Returns:
+        Compact dictionary containing:
+        - ts, symbol, best_bid, best_ask, mid, tick_size
+        - spread_points, spread_bps
+        - depth: {bid_qty_sum_topN, ask_qty_sum_topN, depth_10bps, depth_20bps}
+        - obi: {snapshots, mean, stdev} - Order Book Imbalance
+        - walls: {bid, ask} - Top 3 walls with size_ratio and persistence_score
+        - trade_flow: {buy_qty_sum, sell_qty_sum, taker_imbalance}
+        - slippage_est: {p50_points, p95_points}
+        - micro_health_score: 0-100 overall health rating
+        - wall_risk_level: low/medium/high (spoofing/manipulation risk)
+        - notes: Warnings and degradation reasons (max 6)
+    """
+    logger.info(f"Tool called: microstructure_snapshot with symbol={symbol}")
+    
+    try:
+        from binance_mcp_server.tools.microstructure import microstructure_snapshot as _microstructure_snapshot
+        result = _microstructure_snapshot(
+            symbol=symbol,
+            depth_levels=depth_levels,
+            snapshots=snapshots,
+            spacing_ms=spacing_ms,
+            trades_limit=trades_limit
+        )
+        
+        if result.get("success"):
+            logger.info(f"Successfully generated microstructure snapshot for {symbol}")
+        else:
+            logger.warning(f"Failed microstructure snapshot: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in microstructure_snapshot tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def expected_move(
+    symbol: str,
+    horizon_minutes: int = 60,
+    interval: str = "1m",
+    lookback: int = 240
+) -> Dict[str, Any]:
+    """
+    Calculate expected price move based on realized volatility.
+    
+    Uses historical OHLCV data to compute realized volatility and expected move.
+    Does NOT return raw kline data - only compact statistical summaries.
+    
+    Args:
+        symbol: Trading symbol (BTCUSDT or ETHUSDT only)
+        horizon_minutes: Time horizon in minutes (1-1440, default: 60)
+        interval: Kline interval (1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, default: 1m)
+        lookback: Number of klines for calculation (30-1000, default: 240)
+        
+    Returns:
+        Dictionary containing:
+        - ts: Timestamp
+        - symbol: Trading symbol
+        - rv: Annualized realized volatility (%)
+        - expected_move_points: 1-sigma expected move in price points
+        - expected_move_bps: Expected move in basis points
+        - confidence: Score based on data quality (0-1)
+        - current_price: Latest price
+        - horizon_minutes: Time horizon used
+        - interval_used: Kline interval used
+        - candles_analyzed: Number of data points used
+        - notes: Warnings (high/low vol regime, trending market, etc.)
+    """
+    logger.info(f"Tool called: expected_move with symbol={symbol}, horizon={horizon_minutes}m")
+    
+    try:
+        from binance_mcp_server.tools.microstructure import expected_move as _expected_move
+        result = _expected_move(
+            symbol=symbol,
+            horizon_minutes=horizon_minutes,
+            interval=interval,
+            lookback=lookback
+        )
+        
+        if result.get("success"):
+            logger.info(f"Successfully calculated expected move for {symbol}")
+        else:
+            logger.warning(f"Failed expected_move: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in expected_move tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
 
 
 def validate_configuration() -> bool:
