@@ -82,7 +82,7 @@ Configure your AI agent (Claude, GPT-4, or custom bot) to connect to the MCP ser
 }
 ```
 
-**For remote SSE/HTTP connection (CherryStudio, etc.):**
+**For remote SSE connection (CherryStudio, Cursor, etc.):**
 ```json
 {
   "mcpServers": {
@@ -93,6 +93,28 @@ Configure your AI agent (Claude, GPT-4, or custom bot) to connect to the MCP ser
   }
 }
 ```
+
+**For HTTP Streamable transport (Claude Desktop):**
+```json
+{
+  "mcpServers": {
+    "binance": {
+      "url": "http://your-server-ip:8000/mcp",
+      "transport": "streamable-http"
+    }
+  }
+}
+```
+
+**CherryStudio Configuration:**
+1. Open Settings → MCP Servers
+2. Add new server with URL: `http://your-server-ip:8000/sse`
+3. Select transport: `SSE`
+
+**Cursor IDE Configuration:**
+1. Edit `~/.cursor/mcp_config.json`
+2. Add the server configuration above
+3. Restart Cursor
 
 ### 5️⃣ Remote Server Deployment (SSE/HTTP)
 
@@ -137,7 +159,7 @@ sudo systemctl start binance-mcp
 📖 **[Complete Deployment Guide](docs/futures-tools.md#deployment-guide)** - Nginx, Docker, SSL setup
 ## 📚 Available Tools
 
-Our MCP server provides **30+ comprehensive trading tools** that enable AI agents to perform cryptocurrency trading operations. Each tool follows the Model Context Protocol standard for seamless integration.
+Our MCP server provides **32+ comprehensive trading tools** that enable AI agents to perform cryptocurrency trading operations. Each tool follows the Model Context Protocol standard for seamless integration.
 
 ### 🏦 Account & Portfolio Management (Spot)
 | Tool | Purpose |
@@ -198,6 +220,17 @@ Our MCP server provides **30+ comprehensive trading tools** that enable AI agent
 | `cancel_on_ttl_futures` | Auto-cancel unfilled orders after TTL |
 
 📖 **[Futures Tools Documentation](docs/futures-tools.md)** - Comprehensive guide with examples
+
+### 🔬 Microstructure Analysis (Token-Efficient)
+
+These tools provide **compact market microstructure analysis** designed for LLM context efficiency (< 2KB output). They eliminate the need to fetch raw orderbook/trades and write calculation code - all analysis is done server-side.
+
+| Tool | Purpose |
+|------|---------|
+| `microstructure_snapshot` | Compact market structure summary with OBI, walls, flow, health score |
+| `expected_move` | Realized volatility and expected price movement (no raw OHLCV returned) |
+
+📖 **[Microstructure Tools Documentation](#microstructure-snapshot-tool)** - Detailed guide below
 
 
 ## 🔧 Configuration
@@ -450,6 +483,118 @@ export MCP_MAX_REQUESTS_PER_MINUTE="60"
 }
 ```
 
+### 🔬 Microstructure Snapshot Tool
+
+The `microstructure_snapshot` tool provides a **compact, token-efficient** market structure analysis. Instead of returning raw orderbook/trades data, it computes and returns only the essential metrics.
+
+**Use Case**: LLM-based trading systems that need market structure insights without context explosion.
+
+```python
+# Get microstructure snapshot for BTCUSDT
+{
+    "name": "microstructure_snapshot",
+    "arguments": {
+        "symbol": "BTCUSDT",
+        "depth_levels": 20,
+        "snapshots": 3,
+        "spacing_ms": 2000,
+        "trades_limit": 300
+    }
+}
+```
+
+**Example Output** (< 2KB):
+```json
+{
+  "success": true,
+  "data": {
+    "ts": 1734567890123,
+    "symbol": "BTCUSDT",
+    "best_bid": 104250.5,
+    "best_ask": 104251.0,
+    "mid": 104250.75,
+    "tick_size": 0.1,
+    "spread_points": 0.5,
+    "spread_bps": 0.05,
+    "depth": {
+      "bid_qty_sum_topN": 125.5,
+      "ask_qty_sum_topN": 118.2,
+      "depth_10bps": 85.3,
+      "depth_20bps": 210.7
+    },
+    "obi": {
+      "snapshots": [0.12, 0.08, 0.15],
+      "mean": 0.1167,
+      "stdev": 0.0351
+    },
+    "walls": {
+      "bid": [
+        {"price": 104200.0, "qty": 15.5, "size_ratio_vs_median": 4.2, "persistence_score": 1.0},
+        {"price": 104150.0, "qty": 12.3, "size_ratio_vs_median": 3.3, "persistence_score": 0.67}
+      ],
+      "ask": [
+        {"price": 104300.0, "qty": 18.2, "size_ratio_vs_median": 4.9, "persistence_score": 1.0}
+      ]
+    },
+    "trade_flow": {
+      "buy_qty_sum": 45.2,
+      "sell_qty_sum": 38.7,
+      "taker_imbalance": 0.077
+    },
+    "slippage_est": {
+      "p50_points": 0.3,
+      "p95_points": 1.2
+    },
+    "micro_health_score": 85,
+    "wall_risk_level": "low",
+    "notes": ["spread=0.05bps(excellent)"]
+  }
+}
+```
+
+**Key Metrics Explained**:
+- **OBI (Order Book Imbalance)**: [-1, 1] where positive = bid pressure
+- **Walls**: Large orders with persistence scoring (0=new, 1=stable)
+- **Micro Health Score**: 0-100 overall market quality rating
+- **Wall Risk Level**: Spoofing/manipulation risk assessment
+
+### 📊 Expected Move Tool
+
+Calculate expected price movement based on realized volatility without returning raw OHLCV data.
+
+```python
+# Get expected move for 1 hour horizon
+{
+    "name": "expected_move",
+    "arguments": {
+        "symbol": "BTCUSDT",
+        "horizon_minutes": 60,
+        "interval": "1m",
+        "lookback": 240
+    }
+}
+```
+
+**Example Output**:
+```json
+{
+  "success": true,
+  "data": {
+    "ts": 1734567890123,
+    "symbol": "BTCUSDT",
+    "rv": 45.32,
+    "expected_move_points": 52.5,
+    "expected_move_bps": 50.35,
+    "confidence": 0.95,
+    "current_price": 104250.0,
+    "horizon_minutes": 60,
+    "interval_used": "1m",
+    "candles_analyzed": 240,
+    "notes": []
+  }
+}
+```
+
 ## 🎯 Roadmap
 
 ### 🚀 Phase 1: Core Foundation ✅
@@ -476,10 +621,11 @@ export MCP_MAX_REQUESTS_PER_MINUTE="60"
 
 
 ### 📈 Success Metrics
-- **Tool Coverage**: 15/15 core tools implemented ✅
-- **Test Coverage**: >90% code coverage target (currently 38 tests passing)
+- **Tool Coverage**: 32+ tools implemented including futures & microstructure analysis ✅
+- **Test Coverage**: >90% code coverage target (currently 75+ tests passing)
 - **Security Compliance**: MCP best practices implemented ✅
 - **Performance**: <100ms average API response time
+- **Token Efficiency**: Microstructure tools output < 2KB for LLM optimization
 - **Community**: Growing GitHub engagement and contributions
 - **Production Usage**: Stable package releases on PyPI
 
