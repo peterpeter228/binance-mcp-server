@@ -1,0 +1,36 @@
+[Unit]
+Description=Binance MCP Server - Limit Order Optimization Tools
+Documentation=https://github.com/AnalyticAce/binance-mcp-server
+After=network.target
+
+[Service]
+Type=simple
+# 修改为你的用户
+User=root
+# 修改为你的项目路径
+WorkingDirectory=/root/binance-mcp-server
+
+# 环境变量 - 修改为你的 API 密钥
+Environment="BINANCE_API_KEY=your_api_key_here"
+Environment="BINANCE_API_SECRET=your_api_secret_here"
+# 设置为 false 使用主网，true 使用测试网
+Environment="BINANCE_TESTNET=false"
+
+# 使用虚拟环境中的可执行文件
+# 修改路径为你的实际路径
+ExecStart=/root/binance-mcp-server/venv/bin/binance-mcp-server --transport sse --host 0.0.0.0 --port 8000 --log-level INFO
+
+# 重启策略
+Restart=always
+RestartSec=10
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=binance-mcp
+
+# 安全设置
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
