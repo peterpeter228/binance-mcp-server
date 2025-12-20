@@ -199,6 +199,21 @@ Our MCP server provides **30+ comprehensive trading tools** that enable AI agent
 
 📖 **[Futures Tools Documentation](docs/futures-tools.md)** - Comprehensive guide with examples
 
+### 📊 Limit Order Optimization (BTCUSDT/ETHUSDT)
+
+| Tool | Purpose |
+|------|---------|
+| `queue_fill_estimator_futures` | Estimate queue position, ETA, fill probability, and adverse selection risk |
+| `volume_profile_levels_futures` | Identify VPOC, VAH/VAL, HVN/LVN, magnet levels, and avoid zones |
+
+These tools help LLMs make better limit order placement decisions by:
+- Quantifying fill probability at different price levels
+- Estimating expected time to fill (ETA at p50 and p95)
+- Calculating adverse selection risk scores
+- Identifying key support/resistance from volume distribution
+
+📖 **[Limit Order Tools Documentation](docs/limit-order-tools.md)** - Complete guide with examples
+
 
 ## 🔧 Configuration
 
