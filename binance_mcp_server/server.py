@@ -99,6 +99,10 @@ mcp = FastMCP(
     - get_ttl_job_status: Track TTL cancellation jobs
     - cancel_ttl_job: Cancel pending TTL job
     
+    Limit Order Analysis Tools (for maker strategy optimization):
+    - queue_fill_estimator_futures: Estimate queue position, fill probability, and ETA
+    - volume_profile_levels_futures: Calculate VPOC, VAH/VAL, HVN/LVN levels
+    
     All futures tools:
     - Auto-validate against exchange filters (tickSize, stepSize, minNotional)
     - Round prices/quantities to valid precision
@@ -1391,6 +1395,170 @@ def cancel_ttl_job(job_id: str) -> Dict[str, Any]:
         logger.error(f"Unexpected error in cancel_ttl_job tool: {str(e)}")
         return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
 
+
+# ============================================================================
+# LIMIT ORDER ANALYSIS TOOLS
+# These tools provide advanced limit order placement analysis for maker strategies.
+# ============================================================================
+
+
+@mcp.tool()
+def queue_fill_estimator_futures(
+    symbol: str,
+    side: str,
+    price_levels: list,
+    qty: float,
+    lookback_seconds: float = 30.0
+) -> Dict[str, Any]:
+    """
+    Estimate queue fill probability and ETA for limit orders.
+    
+    Analyzes orderbook depth and trade flow to estimate:
+    - Queue position at each price level
+    - Fill probability within 30s/60s windows
+    - Estimated time to fill (median and 95th percentile)
+    - Adverse selection risk score
+    - Market microstructure health
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT)
+        side: Order side ("BUY" or "SELL")
+        price_levels: List of price levels to analyze (max 5)
+        qty: Order quantity
+        lookback_seconds: Lookback window for trade analysis (5-300s, default 30s)
+        
+    Returns:
+        Dictionary containing:
+        - per_level: Analysis for each price level
+        - global: Market microstructure metrics and recommendation
+        - quality_flags: Data quality indicators
+        
+    Example response structure:
+        {
+            "ts_ms": 1703123456789,
+            "inputs": {...},
+            "per_level": [
+                {
+                    "price": 42000.0,
+                    "queue_qty_est": 12.5,
+                    "queue_value_usd": 525000,
+                    "consumption_rate_qty_per_s": 0.85,
+                    "eta_p50_s": 7.3,
+                    "eta_p95_s": 22.1,
+                    "fill_prob_30s": 0.82,
+                    "fill_prob_60s": 0.97,
+                    "adverse_selection_score": 25.5,
+                    "notes_max2": ["Normal conditions"]
+                }
+            ],
+            "global": {
+                "micro_health_score": 85.2,
+                "spread_bps": 0.5,
+                "obi_mean": 0.12,
+                "obi_stdev": 0.08,
+                "wall_risk_level": "low",
+                "recommendation": {"best_price": 42000.0, "why": "High fill probability"}
+            }
+        }
+    """
+    logger.info(f"Tool called: queue_fill_estimator_futures with symbol={symbol}, side={side}")
+    
+    try:
+        from binance_mcp_server.tools.futures import queue_fill_estimator as _queue_fill_estimator
+        result = _queue_fill_estimator(
+            symbol=symbol,
+            side=side,
+            price_levels=price_levels,
+            qty=qty,
+            lookback_seconds=lookback_seconds
+        )
+        
+        if result.get("success"):
+            logger.info(f"Successfully analyzed queue for {symbol}")
+        else:
+            logger.warning(f"Queue analysis failed: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in queue_fill_estimator_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def volume_profile_levels_futures(
+    symbol: str,
+    window_minutes: int = 240,
+    bin_size: Optional[float] = None
+) -> Dict[str, Any]:
+    """
+    Calculate volume profile levels for market structure analysis.
+    
+    Analyzes trade data to identify key structural levels:
+    - VPOC (Volume Point of Control): Highest volume price
+    - VAH/VAL (Value Area High/Low): 70% volume range
+    - HVN (High Volume Nodes): Strong support/resistance
+    - LVN (Low Volume Nodes): Price moves quickly through
+    - Single Print Zones: Gaps in volume distribution
+    - Magnet Levels: Prices that attract price action
+    - Avoid Zones: Risky areas for limit orders
+    
+    Args:
+        symbol: Trading pair symbol (BTCUSDT or ETHUSDT)
+        window_minutes: Time window in minutes (15-1440, default 240 = 4 hours)
+        bin_size: Price bin size in USD (auto-calculated if None)
+        
+    Returns:
+        Dictionary containing:
+        - window: Time window and trade statistics
+        - levels: All calculated structural levels
+        - quality_flags: Data quality indicators
+        
+    Example response structure:
+        {
+            "ts_ms": 1703123456789,
+            "window": {
+                "requested_minutes": 240,
+                "actual_minutes": 238.5,
+                "trade_count": 15234,
+                "bin_size": 25.0,
+                "price_range": {"low": 41500.0, "high": 43200.0}
+            },
+            "levels": {
+                "vpoc": 42350.0,
+                "vah": 42800.0,
+                "val": 41900.0,
+                "hvn": [42350.0, 42100.0, 42600.0],
+                "lvn": [42475.0, 41975.0, 42725.0],
+                "single_print_zones": [{"low": 42900.0, "high": 43000.0}],
+                "magnet_levels": [42350.0, 42800.0, 41900.0],
+                "avoid_zones": [
+                    {"price": 42475.0, "reason": "LVN - quick price movement"}
+                ]
+            }
+        }
+    """
+    logger.info(f"Tool called: volume_profile_levels_futures with symbol={symbol}, window={window_minutes}min")
+    
+    try:
+        from binance_mcp_server.tools.futures import volume_profile_levels as _volume_profile_levels
+        result = _volume_profile_levels(
+            symbol=symbol,
+            window_minutes=window_minutes,
+            bin_size=bin_size
+        )
+        
+        if result.get("success"):
+            levels = result.get("levels", {})
+            logger.info(f"Successfully calculated volume profile for {symbol}: VPOC={levels.get('vpoc')}")
+        else:
+            logger.warning(f"Volume profile failed: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in volume_profile_levels_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
 
 
 def validate_configuration() -> bool:

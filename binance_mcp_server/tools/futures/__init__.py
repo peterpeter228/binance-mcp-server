@@ -27,6 +27,9 @@ from binance_mcp_server.tools.futures.cancel_on_ttl import (
     get_ttl_job_status,
     cancel_ttl_job,
 )
+# Limit Order Analysis Tools
+from binance_mcp_server.tools.futures.queue_fill_estimator import queue_fill_estimator
+from binance_mcp_server.tools.futures.volume_profile_levels import volume_profile_levels
 
 __all__ = [
     # P0 - Core Tools
@@ -49,4 +52,7 @@ __all__ = [
     "cancel_on_ttl",
     "get_ttl_job_status",
     "cancel_ttl_job",
+    # P2 - Limit Order Analysis Tools
+    "queue_fill_estimator",
+    "volume_profile_levels",
 ]
