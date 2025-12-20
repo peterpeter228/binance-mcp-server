@@ -197,6 +197,15 @@ Our MCP server provides **30+ comprehensive trading tools** that enable AI agent
 | `place_bracket_orders_futures` | Entry + SL + TPs with OCO-like coordination |
 | `cancel_on_ttl_futures` | Auto-cancel unfilled orders after TTL |
 
+### 🎯 Limit Order Analysis Tools (Maker Strategy Optimization)
+
+These tools help optimize limit order placement for better fill rates and reduced adverse selection:
+
+| Tool | Purpose |
+|------|---------|
+| `queue_fill_estimator_futures` | Estimate queue position, fill probability (30s/60s), ETA, and adverse selection risk |
+| `volume_profile_levels_futures` | Calculate VPOC, VAH/VAL, HVN/LVN, magnet levels, and avoid zones |
+
 📖 **[Futures Tools Documentation](docs/futures-tools.md)** - Comprehensive guide with examples
 
 
@@ -448,6 +457,34 @@ export MCP_MAX_REQUESTS_PER_MINUTE="60"
     "name": "get_position_info",
     "arguments": {}
 }
+```
+
+### 🎯 Limit Order Analysis (Maker Strategy Optimization)
+
+```python
+# Estimate queue position and fill probability for limit orders
+{
+    "name": "queue_fill_estimator_futures",
+    "arguments": {
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "price_levels": [42000.0, 41990.0, 41980.0],
+        "qty": 0.1,
+        "lookback_seconds": 30
+    }
+}
+# Returns: queue_qty_est, fill_prob_30s/60s, eta_p50/p95, adverse_selection_score
+
+# Get volume profile levels for market structure analysis
+{
+    "name": "volume_profile_levels_futures",
+    "arguments": {
+        "symbol": "BTCUSDT",
+        "window_minutes": 240,
+        "bin_size": 25.0
+    }
+}
+# Returns: vpoc, vah/val, hvn/lvn, magnet_levels, avoid_zones
 ```
 
 ## 🎯 Roadmap
