@@ -34,6 +34,15 @@ from binance_mcp_server.tools.futures.volume_profile_levels import volume_profil
 from binance_mcp_server.tools.futures.liquidity_wall_persistence import liquidity_wall_persistence
 from binance_mcp_server.tools.futures.queue_fill_probability_multi_horizon import queue_fill_probability_multi_horizon
 from binance_mcp_server.tools.futures.volume_profile_fallback_from_trades import volume_profile_fallback_from_trades
+# WebSocket-based Volume Profile Tool (no REST API calls)
+from binance_mcp_server.tools.futures.volume_profile_levels_ws import (
+    volume_profile_levels_futures_ws,
+    get_ws_buffer_status,
+)
+from binance_mcp_server.tools.futures.ws_trade_buffer import (
+    get_ws_trade_buffer_manager,
+    start_ws_buffer_for_symbols,
+)
 
 __all__ = [
     # P0 - Core Tools
@@ -63,4 +72,9 @@ __all__ = [
     "liquidity_wall_persistence",
     "queue_fill_probability_multi_horizon",
     "volume_profile_fallback_from_trades",
+    # P4 - WebSocket-based Tools (no REST API calls)
+    "volume_profile_levels_futures_ws",
+    "get_ws_buffer_status",
+    "get_ws_trade_buffer_manager",
+    "start_ws_buffer_for_symbols",
 ]

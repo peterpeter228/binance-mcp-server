@@ -216,6 +216,15 @@ Advanced tools with built-in caching (30-60s TTL) and exponential backoff with j
 | `queue_fill_probability_multi_horizon_futures` | Multi-horizon fill probability (60s/300s/900s), adverse selection | 30s |
 | `volume_profile_fallback_from_trades_futures` | VP fallback when main tool is rate-limited | 45s |
 
+### 🌐 WebSocket-based Tools (NO REST API Calls)
+
+Real-time tools using WebSocket streams - zero REST API calls, purely local buffer calculation:
+
+| Tool | Purpose | Cache TTL |
+|------|---------|-----------|
+| `volume_profile_levels_futures_ws` | Real-time VP from WebSocket aggTrade buffer | 30s |
+| `get_ws_buffer_status_futures` | Check WebSocket connection and buffer status | - |
+
 📖 **[Futures Tools Documentation](docs/futures-tools.md)** - Comprehensive guide with examples
 
 
@@ -562,6 +571,47 @@ export MCP_MAX_REQUESTS_PER_MINUTE="60"
 #     "magnet_levels": [42350.0, 42800.0, 41900.0]
 #   },
 #   "confidence_0_1": 0.75
+# }
+```
+
+### 🌐 WebSocket-based Tools (NO REST API Calls)
+
+```python
+# Real-time Volume Profile from WebSocket buffer (NO REST API calls)
+# Auto-subscribes to aggTrade stream and maintains local ring buffer
+{
+    "name": "volume_profile_levels_futures_ws",
+    "arguments": {
+        "symbol": "BTCUSDT",
+        "window_minutes": 240,
+        "bin_size": 25
+    }
+}
+# Returns: Compatible output with volume_profile_levels_futures
+# Example output:
+# {
+#   "window": {"actual_minutes": 180.5, "trade_count": 15234},
+#   "levels": {
+#     "vpoc": 42350.0, "vah": 42800.0, "val": 41900.0,
+#     "hvn": [42350.0, 42100.0, 42600.0],
+#     "lvn": [42475.0, 41975.0],
+#     "magnet_levels": [42350.0, 42800.0, 41900.0],
+#     "avoid_zones": [{"price": 42475.0, "reason": "LVN"}]
+#   },
+#   "ws_stats": {"is_connected": true, "buffer_trade_count": 50000},
+#   "confidence_0_1": 0.85
+# }
+
+# Check WebSocket buffer status
+{
+    "name": "get_ws_buffer_status_futures",
+    "arguments": {"symbol": "BTCUSDT"}
+}
+# Returns: Connection status and buffer statistics
+# {
+#   "is_connected": true,
+#   "subscribed_symbols": ["BTCUSDT", "ETHUSDT"],
+#   "symbol_stats": {"trade_count": 45000, "buffer_duration_minutes": 180.5}
 # }
 ```
 

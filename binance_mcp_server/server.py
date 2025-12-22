@@ -108,6 +108,10 @@ mcp = FastMCP(
     - queue_fill_probability_multi_horizon_futures: Multi-horizon fill probability (60s/300s/900s)
     - volume_profile_fallback_from_trades_futures: VP fallback when main tool is rate-limited
     
+    WebSocket-based Tools (NO REST API calls):
+    - volume_profile_levels_futures_ws: Real-time VP from WebSocket trade buffer
+    - get_ws_buffer_status_futures: Check WebSocket connection and buffer status
+    
     All futures tools:
     - Auto-validate against exchange filters (tickSize, stepSize, minNotional)
     - Round prices/quantities to valid precision
@@ -1819,6 +1823,163 @@ def volume_profile_fallback_from_trades_futures(
         
     except Exception as e:
         logger.error(f"Unexpected error in volume_profile_fallback_from_trades_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+# ============================================================================
+# WEBSOCKET-BASED TOOLS
+# These tools use WebSocket streams for real-time data without REST API calls.
+# ============================================================================
+
+
+@mcp.tool()
+def volume_profile_levels_futures_ws(
+    symbol: str,
+    window_minutes: int = 240,
+    bin_size: Optional[float] = None
+) -> Dict[str, Any]:
+    """
+    Calculate volume profile from WebSocket trade buffer (NO REST API calls).
+    
+    Uses locally buffered aggTrade data from WebSocket stream for real-time
+    volume profile analysis. This tool does NOT make any REST API calls.
+    
+    Prerequisites:
+    - WebSocket connection is auto-established when tool is first called
+    - Buffer needs time to collect trades (wait ~60 seconds for initial data)
+    - For best results, keep server running to maintain continuous buffer
+    
+    Features:
+    - Zero REST API calls - all data from local WebSocket buffer
+    - 30-second cache for identical parameters
+    - Auto-subscribes to symbol's aggTrade stream
+    - Auto-reconnect on WebSocket disconnection
+    - Compatible output with volume_profile_levels_futures
+    
+    Args:
+        symbol: Trading symbol (BTCUSDT or ETHUSDT)
+        window_minutes: Time window in minutes (default 240, max 360)
+        bin_size: Price bin size (auto-calculated if None)
+        
+    Returns:
+        Dictionary containing:
+        - vpoc: Volume Point of Control (tPOC from trades)
+        - vah/val: Value Area High/Low (70% volume)
+        - hvn: High Volume Nodes (<=3)
+        - lvn: Low Volume Nodes (<=3)
+        - single_print_zones: Gaps in volume (<=3)
+        - magnet_levels: Price magnets (<=6)
+        - avoid_zones: Zones to avoid (<=3)
+        - ws_stats: WebSocket buffer statistics
+        - quality_flags: ["insufficient_trade_data"] if buffer is empty
+        
+    Example response:
+        {
+            "success": true,
+            "ts_ms": 1703123456789,
+            "window": {
+                "requested_minutes": 240,
+                "actual_minutes": 180.5,
+                "trade_count": 15234,
+                "bin_size": 25.0
+            },
+            "levels": {
+                "vpoc": 42350.0,
+                "vah": 42800.0,
+                "val": 41900.0,
+                "hvn": [42350.0, 42100.0, 42600.0],
+                "lvn": [42475.0, 41975.0],
+                "magnet_levels": [42350.0, 42800.0, 41900.0],
+                "avoid_zones": [{"price": 42475.0, "reason": "LVN"}]
+            },
+            "ws_stats": {
+                "is_connected": true,
+                "buffer_trade_count": 50000,
+                "buffer_duration_minutes": 240.5
+            },
+            "confidence_0_1": 0.85
+        }
+        
+    Error response (insufficient data):
+        {
+            "success": false,
+            "error": {"type": "data_error", "message": "Insufficient trade data"},
+            "quality_flags": ["insufficient_trade_data"],
+            "ws_stats": {"is_connected": true, "buffer_trade_count": 50}
+        }
+    """
+    logger.info(f"Tool called: volume_profile_levels_futures_ws with symbol={symbol}, window={window_minutes}min")
+    
+    try:
+        from binance_mcp_server.tools.futures import volume_profile_levels_futures_ws as _vp_ws
+        result = _vp_ws(
+            symbol=symbol,
+            window_minutes=window_minutes,
+            bin_size=bin_size
+        )
+        
+        if result.get("success"):
+            levels = result.get("levels", {})
+            ws_stats = result.get("ws_stats", {})
+            logger.info(
+                f"VP WS analysis complete for {symbol}: "
+                f"vPOC={levels.get('vpoc')}, "
+                f"trades={ws_stats.get('buffer_trade_count', 0)}"
+            )
+        else:
+            logger.warning(f"VP WS failed: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in volume_profile_levels_futures_ws tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def get_ws_buffer_status_futures(symbol: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get WebSocket buffer status and statistics.
+    
+    Utility tool to check WebSocket connection status and buffer contents.
+    Useful for debugging and monitoring the WebSocket-based tools.
+    
+    Args:
+        symbol: Optional specific symbol to get stats for
+        
+    Returns:
+        Dictionary containing:
+        - is_connected: Whether WebSocket is connected
+        - subscribed_symbols: List of subscribed symbols
+        - symbol_stats: Stats for specific symbol (if provided)
+            - trade_count: Number of trades in buffer
+            - oldest_trade_ms: Timestamp of oldest trade
+            - newest_trade_ms: Timestamp of newest trade
+            - buffer_duration_minutes: Time span of buffered data
+            
+    Example response:
+        {
+            "is_connected": true,
+            "subscribed_symbols": ["BTCUSDT", "ETHUSDT"],
+            "symbol_stats": {
+                "symbol": "BTCUSDT",
+                "trade_count": 45000,
+                "buffer_duration_minutes": 180.5,
+                "is_connected": true
+            }
+        }
+    """
+    logger.info(f"Tool called: get_ws_buffer_status_futures with symbol={symbol}")
+    
+    try:
+        from binance_mcp_server.tools.futures import get_ws_buffer_status as _get_status
+        result = _get_status(symbol=symbol)
+        
+        logger.info(f"WS buffer status: connected={result.get('is_connected')}, symbols={result.get('subscribed_symbols')}")
+        return {"success": True, **result}
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in get_ws_buffer_status_futures tool: {str(e)}")
         return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
 
 
