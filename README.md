@@ -106,35 +106,92 @@ binance-mcp-server --transport sse --host 0.0.0.0 --port 8000
 binance-mcp-server --transport streamable-http --host 0.0.0.0 --port 8000
 ```
 
-**Systemd Service (Ubuntu):**
+### 6️⃣ Production Deployment (Ubuntu + Systemd)
+
+**Quick Automated Deployment:**
 ```bash
+# Clone and run deployment script
+git clone https://github.com/AnalyticAce/binance-mcp-server.git
+cd binance-mcp-server
+sudo bash scripts/deploy_ubuntu.sh
+
+# Configure your API credentials
+sudo nano /etc/binance-mcp/binance-mcp.env
+
+# Start and enable service
+sudo systemctl start binance-mcp
+sudo systemctl enable binance-mcp
+```
+
+**Manual Systemd Setup:**
+```bash
+# Create systemd service file
 sudo nano /etc/systemd/system/binance-mcp.service
 ```
 
 ```ini
 [Unit]
 Description=Binance MCP Server
-After=network.target
+After=network.target network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=ubuntu
-Environment="BINANCE_API_KEY=your_key"
-Environment="BINANCE_API_SECRET=your_secret"
-ExecStart=/home/ubuntu/.local/bin/binance-mcp-server --transport sse --host 0.0.0.0 --port 8000
+WorkingDirectory=/home/ubuntu
+
+# Environment configuration
+EnvironmentFile=/etc/binance-mcp/binance-mcp.env
+
+# Start command
+ExecStart=/home/ubuntu/.local/bin/binance-mcp-server \
+    --transport sse \
+    --host 0.0.0.0 \
+    --port 8000
+
+# Auto-restart on failure
 Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=binance-mcp
 
 [Install]
 WantedBy=multi-user.target
 ```
 
+**Create environment file:**
 ```bash
+sudo mkdir -p /etc/binance-mcp
+sudo nano /etc/binance-mcp/binance-mcp.env
+```
+
+```ini
+BINANCE_API_KEY=your_api_key_here
+BINANCE_API_SECRET=your_api_secret_here
+BINANCE_TESTNET=false
+```
+
+**Secure and start:**
+```bash
+sudo chmod 600 /etc/binance-mcp/binance-mcp.env
 sudo systemctl daemon-reload
 sudo systemctl enable binance-mcp
 sudo systemctl start binance-mcp
+
+# Check status
+sudo systemctl status binance-mcp
+sudo journalctl -u binance-mcp -f
 ```
 
-📖 **[Complete Deployment Guide](docs/futures-tools.md#deployment-guide)** - Nginx, Docker, SSL setup
+📖 **[Complete Ubuntu Deployment Guide](docs/deployment-ubuntu.md)** - Nginx reverse proxy, SSL, monitoring, troubleshooting
 ## 📚 Available Tools
 
 Our MCP server provides **30+ comprehensive trading tools** that enable AI agents to perform cryptocurrency trading operations. Each tool follows the Model Context Protocol standard for seamless integration.

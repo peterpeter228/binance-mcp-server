@@ -1,0 +1,42 @@
+[Unit]
+Description=Binance MCP Server (HTTP Transport)
+Documentation=https://github.com/AnalyticAce/binance-mcp-server
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=binance-mcp
+Group=binance-mcp
+WorkingDirectory=/opt/binance-mcp-server
+
+# Load environment variables from config file
+EnvironmentFile=/etc/binance-mcp/binance-mcp.env
+
+# Start the MCP server with HTTP transport
+ExecStart=/opt/binance-mcp-server/venv/bin/binance-mcp-server \
+    --transport streamable-http \
+    --host ${MCP_HOST} \
+    --port ${MCP_PORT} \
+    --log-level ${MCP_LOG_LEVEL}
+
+# Automatic restart on failure
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+
+# Logging to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=binance-mcp-http
+
+[Install]
+WantedBy=multi-user.target
