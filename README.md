@@ -206,6 +206,16 @@ These tools help optimize limit order placement for better fill rates and reduce
 | `queue_fill_estimator_futures` | Estimate queue position, fill probability (30s/60s), ETA, and adverse selection risk |
 | `volume_profile_levels_futures` | Calculate VPOC, VAH/VAL, HVN/LVN, magnet levels, and avoid zones |
 
+### 🔬 Advanced Limit Order Analysis Tools (with Caching & Rate Limit Handling)
+
+Advanced tools with built-in caching (30-60s TTL) and exponential backoff with jitter for rate limit handling:
+
+| Tool | Purpose | Cache TTL |
+|------|---------|-----------|
+| `liquidity_wall_persistence_futures` | Track order book walls, detect spoofing, find magnet levels | 60s |
+| `queue_fill_probability_multi_horizon_futures` | Multi-horizon fill probability (60s/300s/900s), adverse selection | 30s |
+| `volume_profile_fallback_from_trades_futures` | VP fallback when main tool is rate-limited | 45s |
+
 📖 **[Futures Tools Documentation](docs/futures-tools.md)** - Comprehensive guide with examples
 
 
@@ -485,6 +495,74 @@ export MCP_MAX_REQUESTS_PER_MINUTE="60"
     }
 }
 # Returns: vpoc, vah/val, hvn/lvn, magnet_levels, avoid_zones
+```
+
+### 🔬 Advanced Limit Order Analysis (with Caching & Rate Limits)
+
+```python
+# Track order book walls and detect spoofing patterns (60s cache)
+{
+    "name": "liquidity_wall_persistence_futures",
+    "arguments": {
+        "symbol": "BTCUSDT",
+        "depth_limit": 50,
+        "window_seconds": 60,
+        "sample_interval_ms": 1000,
+        "top_n": 5,
+        "wall_threshold_usd": 1000000
+    }
+}
+# Returns: bid_walls, ask_walls, spoof_risk_score_0_100, magnet_levels, avoid_zones
+# Example output:
+# {
+#   "bid_walls": [{"price": 42000, "notional_usd": 2500000, "persistence_score_0_100": 85.5}],
+#   "spoof_risk_score_0_100": 25.0,
+#   "magnet_levels": [42000.0, 42500.0]
+# }
+
+# Multi-horizon fill probability estimation (30s cache)
+{
+    "name": "queue_fill_probability_multi_horizon_futures",
+    "arguments": {
+        "symbol": "BTCUSDT",
+        "side": "LONG",
+        "price_levels": [42000.0, 41900.0, 41800.0],
+        "qty": 0.01,
+        "horizons_sec": [60, 300, 900],
+        "lookback_sec": 120,
+        "assume_queue_position": "mid"
+    }
+}
+# Returns: per_level with fill_prob for each horizon, eta_sec_p50, adverse_selection_score
+# Example output:
+# {
+#   "per_level": [{"price": 42000, "fill_prob": {60: 0.45, 300: 0.82, 900: 0.96}}],
+#   "overall_best_level": 42000.0,
+#   "confidence_0_1": 0.75
+# }
+
+# Volume profile fallback from trades (45s cache) - use when main VP tool is rate-limited
+{
+    "name": "volume_profile_fallback_from_trades_futures",
+    "arguments": {
+        "symbol": "BTCUSDT",
+        "lookback_minutes": 240,
+        "bin_size": 25,
+        "max_trades": 5000
+    }
+}
+# Returns: vPOC, VAH/VAL, HVN_levels, LVN_levels, magnet_levels, avoid_zones
+# Example output:
+# {
+#   "levels": {
+#     "vPOC": 42350.0,
+#     "VAH": 42800.0,
+#     "VAL": 41900.0,
+#     "HVN_levels": [42350.0, 42100.0],
+#     "magnet_levels": [42350.0, 42800.0, 41900.0]
+#   },
+#   "confidence_0_1": 0.75
+# }
 ```
 
 ## 🎯 Roadmap

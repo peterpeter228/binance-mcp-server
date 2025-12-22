@@ -103,6 +103,11 @@ mcp = FastMCP(
     - queue_fill_estimator_futures: Estimate queue position, fill probability, and ETA
     - volume_profile_levels_futures: Calculate VPOC, VAH/VAL, HVN/LVN levels
     
+    Advanced Limit Order Analysis Tools (with caching & rate limit handling):
+    - liquidity_wall_persistence_futures: Track order book walls, detect spoofing, find magnet levels
+    - queue_fill_probability_multi_horizon_futures: Multi-horizon fill probability (60s/300s/900s)
+    - volume_profile_fallback_from_trades_futures: VP fallback when main tool is rate-limited
+    
     All futures tools:
     - Auto-validate against exchange filters (tickSize, stepSize, minNotional)
     - Round prices/quantities to valid precision
@@ -1558,6 +1563,262 @@ def volume_profile_levels_futures(
         
     except Exception as e:
         logger.error(f"Unexpected error in volume_profile_levels_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+# ============================================================================
+# ADVANCED LIMIT ORDER ANALYSIS TOOLS
+# These tools provide advanced market microstructure analysis with caching
+# and exponential backoff for rate limit handling.
+# ============================================================================
+
+
+@mcp.tool()
+def liquidity_wall_persistence_futures(
+    symbol: str,
+    depth_limit: int = 50,
+    window_seconds: int = 60,
+    sample_interval_ms: int = 1000,
+    top_n: int = 5,
+    wall_threshold_usd: float = 1000000
+) -> Dict[str, Any]:
+    """
+    Track order book walls and detect spoofing patterns.
+    
+    Samples the orderbook over a time window to identify:
+    - Persistent bid/ask walls (true liquidity)
+    - Spoof patterns (appearing/disappearing, unstable notionals)
+    - Magnet levels (strong attraction points)
+    - Avoid zones (high spoof risk areas)
+    
+    Features:
+    - 60-second cache for identical parameters
+    - Exponential backoff with jitter on rate limits
+    - Compressed statistics output (no large arrays)
+    
+    Args:
+        symbol: Trading symbol (BTCUSDT or ETHUSDT)
+        depth_limit: Orderbook depth to fetch (default 50, max 100)
+        window_seconds: Sampling window duration (default 60, max 300)
+        sample_interval_ms: Time between samples (default 1000ms, min 500ms)
+        top_n: Number of top walls per side (default 5, max 10)
+        wall_threshold_usd: Minimum notional to consider a wall (default 1M USD)
+        
+    Returns:
+        Dictionary containing:
+        - bid_walls: List of bid walls with persistence scores (<=top_n)
+        - ask_walls: List of ask walls with persistence scores (<=top_n)
+        - spoof_risk_score_0_100: Overall spoofing risk assessment
+        - magnet_levels: High-persistence price levels (<=6)
+        - avoid_zones: Zones with high spoof risk (<=4)
+        - notes: Summary notes
+        
+    Example response:
+        {
+            "success": true,
+            "ts_ms": 1703123456789,
+            "bid_walls": [
+                {"price": 42000.0, "notional_usd": 2500000, "persistence_score_0_100": 85.5, "avg_life_sec": 45.2}
+            ],
+            "ask_walls": [...],
+            "spoof_risk_score_0_100": 25.0,
+            "magnet_levels": [42000.0, 42500.0],
+            "avoid_zones": [{"low": 42100, "high": 42150, "reason": "ask_spoof_risk"}],
+            "notes": ["Low spoof activity", "2 strong magnet levels identified"]
+        }
+    """
+    logger.info(f"Tool called: liquidity_wall_persistence_futures with symbol={symbol}, window={window_seconds}s")
+    
+    try:
+        from binance_mcp_server.tools.futures import liquidity_wall_persistence as _liquidity_wall_persistence
+        result = _liquidity_wall_persistence(
+            symbol=symbol,
+            depth_limit=depth_limit,
+            window_seconds=window_seconds,
+            sample_interval_ms=sample_interval_ms,
+            top_n=top_n,
+            wall_threshold_usd=wall_threshold_usd
+        )
+        
+        if result.get("success"):
+            spoof_score = result.get("spoof_risk_score_0_100", 0)
+            logger.info(f"Wall persistence analysis complete for {symbol}: spoof_risk={spoof_score}")
+        else:
+            logger.warning(f"Wall persistence failed: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in liquidity_wall_persistence_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def queue_fill_probability_multi_horizon_futures(
+    symbol: str,
+    side: str,
+    price_levels: list,
+    qty: float,
+    horizons_sec: Optional[list] = None,
+    lookback_sec: int = 120,
+    assume_queue_position: str = "mid"
+) -> Dict[str, Any]:
+    """
+    Estimate fill probability across multiple time horizons.
+    
+    Uses historical trade flow and orderbook depth to estimate:
+    - Fill probability at each horizon (e.g., 60s, 300s, 900s)
+    - Estimated time to fill (P50)
+    - Adverse selection risk score
+    
+    Features:
+    - 30-second cache for identical parameters
+    - Exponential backoff with jitter on rate limits
+    - Compressed statistics output (no large arrays)
+    
+    Args:
+        symbol: Trading symbol (BTCUSDT or ETHUSDT)
+        side: Position side ("LONG" for buy, "SHORT" for sell)
+        price_levels: Price levels to analyze (max 5)
+        qty: Order quantity
+        horizons_sec: Time horizons in seconds (default [60, 300, 900], max 5 horizons)
+        lookback_sec: Lookback for trade flow analysis (default 120, max 600)
+        assume_queue_position: Queue assumption ("best_case", "mid", "worst_case")
+        
+    Returns:
+        Dictionary containing:
+        - per_level: Analysis for each price level (<=5)
+            - price: Price level
+            - fill_prob: Dict of horizon -> probability (0-1)
+            - eta_sec_p50: Estimated time to fill (median)
+            - adverse_selection_score_0_100: Risk score
+        - overall_best_level: Recommended price level
+        - quality_flags: Data quality indicators (<=6)
+        - confidence_0_1: Confidence in estimates
+        
+    Example response:
+        {
+            "success": true,
+            "ts_ms": 1703123456789,
+            "per_level": [
+                {
+                    "price": 42000.0,
+                    "fill_prob": {60: 0.45, 300: 0.82, 900: 0.96},
+                    "eta_sec_p50": 180.5,
+                    "adverse_selection_score_0_100": 30.0
+                }
+            ],
+            "overall_best_level": 42000.0,
+            "confidence_0_1": 0.75
+        }
+    """
+    logger.info(f"Tool called: queue_fill_probability_multi_horizon_futures with symbol={symbol}, side={side}")
+    
+    try:
+        from binance_mcp_server.tools.futures import queue_fill_probability_multi_horizon as _queue_fill_prob
+        result = _queue_fill_prob(
+            symbol=symbol,
+            side=side,
+            price_levels=price_levels,
+            qty=qty,
+            horizons_sec=horizons_sec,
+            lookback_sec=lookback_sec,
+            assume_queue_position=assume_queue_position
+        )
+        
+        if result.get("success"):
+            best = result.get("overall_best_level")
+            logger.info(f"Fill probability analysis complete for {symbol}: best_level={best}")
+        else:
+            logger.warning(f"Fill probability failed: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in queue_fill_probability_multi_horizon_futures tool: {str(e)}")
+        return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
+
+
+@mcp.tool()
+def volume_profile_fallback_from_trades_futures(
+    symbol: str,
+    lookback_minutes: int = 240,
+    bin_size: Optional[float] = None,
+    max_trades: int = 5000
+) -> Dict[str, Any]:
+    """
+    Calculate volume profile from trades (fallback when main VP tool is rate-limited).
+    
+    Provides simplified but reliable VP key structure levels:
+    - vPOC (Volume Point of Control)
+    - VAH/VAL (Value Area at 70%)
+    - HVN/LVN levels
+    - Magnet levels
+    - Avoid zones
+    
+    Use this when volume_profile_levels_futures hits rate limits or is unavailable.
+    
+    Features:
+    - 45-second cache for identical parameters
+    - Exponential backoff with jitter on rate limits
+    - Uses aggTrades as data source
+    - Compressed statistics output (<=12 levels total)
+    
+    Args:
+        symbol: Trading symbol (BTCUSDT or ETHUSDT)
+        lookback_minutes: Time window in minutes (default 240, max 360)
+        bin_size: Price bin size (default 25, auto-calculated if None)
+        max_trades: Maximum trades to process (default 5000, max 5000)
+        
+    Returns:
+        Dictionary containing:
+        - vPOC: Volume Point of Control price
+        - VAH/VAL: Value Area High/Low (70% volume)
+        - HVN_levels: High Volume Nodes (<=3)
+        - LVN_levels: Low Volume Nodes (<=3)
+        - magnet_levels: Price magnets (<=4)
+        - avoid_zones: Zones to avoid (<=3)
+        - confidence_0_1: Confidence in results
+        - notes: Summary notes
+        
+    Example response:
+        {
+            "success": true,
+            "ts_ms": 1703123456789,
+            "levels": {
+                "vPOC": 42350.0,
+                "VAH": 42800.0,
+                "VAL": 41900.0,
+                "HVN_levels": [42350.0, 42100.0, 42600.0],
+                "LVN_levels": [42475.0, 41975.0],
+                "magnet_levels": [42350.0, 42800.0, 41900.0],
+                "avoid_zones": [{"price": 42475.0, "reason": "LVN - quick price movement"}]
+            },
+            "confidence_0_1": 0.75,
+            "notes": ["POC at 42350.0", "Value Area: 41900.0-42800.0"]
+        }
+    """
+    logger.info(f"Tool called: volume_profile_fallback_from_trades_futures with symbol={symbol}, lookback={lookback_minutes}min")
+    
+    try:
+        from binance_mcp_server.tools.futures import volume_profile_fallback_from_trades as _vp_fallback
+        result = _vp_fallback(
+            symbol=symbol,
+            lookback_minutes=lookback_minutes,
+            bin_size=bin_size,
+            max_trades=max_trades
+        )
+        
+        if result.get("success"):
+            levels = result.get("levels", {})
+            logger.info(f"VP fallback analysis complete for {symbol}: vPOC={levels.get('vPOC')}")
+        else:
+            logger.warning(f"VP fallback failed: {result.get('error', {}).get('message')}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in volume_profile_fallback_from_trades_futures tool: {str(e)}")
         return {"success": False, "error": {"type": "tool_error", "message": f"Tool execution failed: {str(e)}"}}
 
 
