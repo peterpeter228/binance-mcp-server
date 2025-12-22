@@ -108,7 +108,7 @@ binance-mcp-server --transport streamable-http --host 0.0.0.0 --port 8000
 
 ### 6️⃣ Production Deployment (Ubuntu + Systemd)
 
-**Quick Automated Deployment:**
+**Quick Automated Deployment (from source):**
 ```bash
 # Clone and run deployment script
 git clone https://github.com/AnalyticAce/binance-mcp-server.git
@@ -123,9 +123,33 @@ sudo systemctl start binance-mcp
 sudo systemctl enable binance-mcp
 ```
 
-**Manual Systemd Setup:**
+**Manual Systemd Setup (from source):**
 ```bash
-# Create systemd service file
+# 1. Create directories and clone source
+sudo mkdir -p /opt/binance-mcp-server
+sudo git clone https://github.com/AnalyticAce/binance-mcp-server.git /opt/binance-mcp-server/src
+
+# 2. Create virtual environment and install
+sudo python3 -m venv /opt/binance-mcp-server/venv
+sudo /opt/binance-mcp-server/venv/bin/pip install -e /opt/binance-mcp-server/src
+sudo /opt/binance-mcp-server/venv/bin/pip install websockets
+
+# 3. Create environment config
+sudo mkdir -p /etc/binance-mcp
+sudo nano /etc/binance-mcp/binance-mcp.env
+```
+
+```ini
+BINANCE_API_KEY=your_api_key_here
+BINANCE_API_SECRET=your_api_secret_here
+BINANCE_TESTNET=false
+MCP_HOST=0.0.0.0
+MCP_PORT=8000
+MCP_TRANSPORT=sse
+```
+
+```bash
+# 4. Create systemd service file
 sudo nano /etc/systemd/system/binance-mcp.service
 ```
 
@@ -137,28 +161,18 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu
-
-# Environment configuration
+User=root
+WorkingDirectory=/opt/binance-mcp-server/src
 EnvironmentFile=/etc/binance-mcp/binance-mcp.env
 
-# Start command
-ExecStart=/home/ubuntu/.local/bin/binance-mcp-server \
-    --transport sse \
-    --host 0.0.0.0 \
-    --port 8000
+ExecStart=/opt/binance-mcp-server/venv/bin/python -m binance_mcp_server.cli \
+    --transport ${MCP_TRANSPORT} \
+    --host ${MCP_HOST} \
+    --port ${MCP_PORT}
 
-# Auto-restart on failure
 Restart=always
 RestartSec=10
 
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=read-only
-
-# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=binance-mcp
@@ -167,28 +181,20 @@ SyslogIdentifier=binance-mcp
 WantedBy=multi-user.target
 ```
 
-**Create environment file:**
 ```bash
-sudo mkdir -p /etc/binance-mcp
-sudo nano /etc/binance-mcp/binance-mcp.env
-```
-
-```ini
-BINANCE_API_KEY=your_api_key_here
-BINANCE_API_SECRET=your_api_secret_here
-BINANCE_TESTNET=false
-```
-
-**Secure and start:**
-```bash
+# 5. Start and enable service
 sudo chmod 600 /etc/binance-mcp/binance-mcp.env
 sudo systemctl daemon-reload
 sudo systemctl enable binance-mcp
 sudo systemctl start binance-mcp
 
-# Check status
+# Check status and logs
 sudo systemctl status binance-mcp
 sudo journalctl -u binance-mcp -f
+
+# Update from source
+cd /opt/binance-mcp-server/src && sudo git pull
+sudo systemctl restart binance-mcp
 ```
 
 📖 **[Complete Ubuntu Deployment Guide](docs/deployment-ubuntu.md)** - Nginx reverse proxy, SSL, monitoring, troubleshooting

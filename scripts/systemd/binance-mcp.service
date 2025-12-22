@@ -8,17 +8,16 @@ Wants=network-online.target
 Type=simple
 User=binance-mcp
 Group=binance-mcp
-WorkingDirectory=/opt/binance-mcp-server
+WorkingDirectory=/opt/binance-mcp-server/src
 
 # Load environment variables from config file
 EnvironmentFile=/etc/binance-mcp/binance-mcp.env
 
-# Start the MCP server with SSE transport
-ExecStart=/opt/binance-mcp-server/venv/bin/binance-mcp-server \
+# Start the MCP server using python -m (source installation)
+ExecStart=/opt/binance-mcp-server/venv/bin/python -m binance_mcp_server.cli \
     --transport ${MCP_TRANSPORT} \
     --host ${MCP_HOST} \
-    --port ${MCP_PORT} \
-    --log-level ${MCP_LOG_LEVEL}
+    --port ${MCP_PORT}
 
 # Automatic restart on failure
 Restart=always
@@ -37,6 +36,9 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictRealtime=true
 RestrictSUIDSGID=true
+
+# Allow write access for editable install
+ReadWritePaths=/opt/binance-mcp-server/src
 
 # Logging to journald
 StandardOutput=journal

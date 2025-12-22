@@ -1,6 +1,6 @@
-# Ubuntu Deployment Guide
+# Ubuntu Deployment Guide (Source Code Installation)
 
-This guide covers deploying the Binance MCP Server on Ubuntu as a systemd service.
+This guide covers deploying the Binance MCP Server on Ubuntu as a systemd service using source code installation (`pip install -e .`).
 
 ## Quick Deployment (Automated)
 
@@ -28,7 +28,7 @@ sudo systemctl enable binance-mcp
 # Update system
 sudo apt-get update && sudo apt-get upgrade -y
 
-# Install Python 3.10+
+# Install Python 3.10+ and Git
 sudo apt-get install -y python3 python3-pip python3-venv git curl
 ```
 
@@ -43,27 +43,36 @@ sudo useradd --system --shell /bin/false --home-dir /opt/binance-mcp-server bina
 
 ```bash
 # Create installation directories
-sudo mkdir -p /opt/binance-mcp-server
+sudo mkdir -p /opt/binance-mcp-server/src
+sudo mkdir -p /opt/binance-mcp-server/venv
 sudo mkdir -p /etc/binance-mcp
 sudo mkdir -p /var/log/binance-mcp
+```
+
+### Step 4: Clone Source Code
+
+```bash
+# Clone the repository
+sudo git clone https://github.com/AnalyticAce/binance-mcp-server.git /opt/binance-mcp-server/src
 
 # Set ownership
 sudo chown -R binance-mcp:binance-mcp /opt/binance-mcp-server
 sudo chown -R binance-mcp:binance-mcp /var/log/binance-mcp
 ```
 
-### Step 4: Install the Package
+### Step 5: Create Virtual Environment and Install
 
 ```bash
 # Create virtual environment
 sudo python3 -m venv /opt/binance-mcp-server/venv
 
-# Activate and install
+# Install from source (editable mode)
 sudo /opt/binance-mcp-server/venv/bin/pip install --upgrade pip
-sudo /opt/binance-mcp-server/venv/bin/pip install binance-mcp-server websockets
+sudo /opt/binance-mcp-server/venv/bin/pip install -e /opt/binance-mcp-server/src
+sudo /opt/binance-mcp-server/venv/bin/pip install websockets
 ```
 
-### Step 5: Create Configuration File
+### Step 6: Create Configuration File
 
 Create `/etc/binance-mcp/binance-mcp.env`:
 
@@ -90,7 +99,6 @@ BINANCE_RECV_WINDOW=5000
 MCP_HOST=0.0.0.0
 MCP_PORT=8000
 MCP_TRANSPORT=sse
-MCP_LOG_LEVEL=INFO
 ```
 
 Secure the configuration file:
@@ -100,7 +108,7 @@ sudo chmod 600 /etc/binance-mcp/binance-mcp.env
 sudo chown binance-mcp:binance-mcp /etc/binance-mcp/binance-mcp.env
 ```
 
-### Step 6: Create Systemd Service File
+### Step 7: Create Systemd Service File
 
 Create `/etc/systemd/system/binance-mcp.service`:
 
@@ -121,17 +129,16 @@ Wants=network-online.target
 Type=simple
 User=binance-mcp
 Group=binance-mcp
-WorkingDirectory=/opt/binance-mcp-server
+WorkingDirectory=/opt/binance-mcp-server/src
 
 # Load environment variables
 EnvironmentFile=/etc/binance-mcp/binance-mcp.env
 
-# Start command
-ExecStart=/opt/binance-mcp-server/venv/bin/binance-mcp-server \
+# Start command using python -m (source installation)
+ExecStart=/opt/binance-mcp-server/venv/bin/python -m binance_mcp_server.cli \
     --transport ${MCP_TRANSPORT} \
     --host ${MCP_HOST} \
-    --port ${MCP_PORT} \
-    --log-level ${MCP_LOG_LEVEL}
+    --port ${MCP_PORT}
 
 # Restart policy
 Restart=always
@@ -151,6 +158,9 @@ ProtectControlGroups=true
 RestrictRealtime=true
 RestrictSUIDSGID=true
 
+# Allow write to source directory for editable install
+ReadWritePaths=/opt/binance-mcp-server/src
+
 # Logging
 StandardOutput=journal
 StandardError=journal
@@ -160,7 +170,7 @@ SyslogIdentifier=binance-mcp
 WantedBy=multi-user.target
 ```
 
-### Step 7: Enable and Start the Service
+### Step 8: Enable and Start the Service
 
 ```bash
 # Reload systemd
@@ -229,6 +239,34 @@ sudo nano /etc/binance-mcp/binance-mcp.env
 sudo systemctl restart binance-mcp
 ```
 
+## Updating from Source
+
+### Manual Update
+
+```bash
+# Stop the service
+sudo systemctl stop binance-mcp
+
+# Update source code
+cd /opt/binance-mcp-server/src
+sudo git fetch origin
+sudo git reset --hard origin/main
+
+# Reinstall package
+sudo /opt/binance-mcp-server/venv/bin/pip install -e .
+
+# Start the service
+sudo systemctl start binance-mcp
+```
+
+### Using Update Script
+
+If you used the automated deployment script, a helper script is available:
+
+```bash
+sudo binance-mcp-update
+```
+
 ## HTTP Transport Configuration
 
 If you prefer HTTP transport over SSE, create an alternative service file:
@@ -248,15 +286,14 @@ Wants=network-online.target
 Type=simple
 User=binance-mcp
 Group=binance-mcp
-WorkingDirectory=/opt/binance-mcp-server
+WorkingDirectory=/opt/binance-mcp-server/src
 
 EnvironmentFile=/etc/binance-mcp/binance-mcp.env
 
-ExecStart=/opt/binance-mcp-server/venv/bin/binance-mcp-server \
+ExecStart=/opt/binance-mcp-server/venv/bin/python -m binance_mcp_server.cli \
     --transport streamable-http \
     --host ${MCP_HOST} \
-    --port ${MCP_PORT} \
-    --log-level ${MCP_LOG_LEVEL}
+    --port ${MCP_PORT}
 
 Restart=always
 RestartSec=10
@@ -264,6 +301,7 @@ RestartSec=10
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
+ReadWritePaths=/opt/binance-mcp-server/src
 
 StandardOutput=journal
 StandardError=journal
@@ -278,6 +316,28 @@ Then use:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl start binance-mcp-http
+```
+
+## Directory Structure
+
+After deployment, the directory structure will be:
+
+```
+/opt/binance-mcp-server/
+├── src/                          # Source code (git repository)
+│   ├── binance_mcp_server/       # Python package
+│   ├── pyproject.toml
+│   └── ...
+└── venv/                         # Python virtual environment
+    ├── bin/
+    │   ├── python
+    │   └── pip
+    └── lib/
+
+/etc/binance-mcp/
+└── binance-mcp.env              # Configuration file (API keys)
+
+/var/log/binance-mcp/            # Log directory (if needed)
 ```
 
 ## Nginx Reverse Proxy (Optional)
@@ -398,46 +458,6 @@ sudo ufw allow 8000/tcp
 sudo ufw enable
 ```
 
-## Monitoring
-
-### Health Check Script
-
-Create `/usr/local/bin/binance-mcp-health`:
-
-```bash
-#!/bin/bash
-# Health check script for monitoring
-
-ENDPOINT="http://localhost:8000/health"
-TIMEOUT=5
-
-response=$(curl -s -o /dev/null -w "%{http_code}" --max-time ${TIMEOUT} ${ENDPOINT} 2>/dev/null)
-
-if [ "$response" = "200" ]; then
-    echo "OK"
-    exit 0
-else
-    echo "FAIL (HTTP ${response})"
-    exit 1
-fi
-```
-
-```bash
-sudo chmod +x /usr/local/bin/binance-mcp-health
-```
-
-### Monitoring with systemd
-
-View service statistics:
-
-```bash
-# Memory and CPU usage
-systemctl status binance-mcp
-
-# Detailed resource usage
-systemd-cgtop
-```
-
 ## Troubleshooting
 
 ### Service Won't Start
@@ -453,8 +473,26 @@ sudo journalctl -u binance-mcp -n 100 --no-pager
 sudo cat /etc/binance-mcp/binance-mcp.env
 
 # Test manual start
-sudo -u binance-mcp /opt/binance-mcp-server/venv/bin/binance-mcp-server \
+sudo -u binance-mcp /opt/binance-mcp-server/venv/bin/python -m binance_mcp_server.cli \
     --transport sse --host 0.0.0.0 --port 8000
+```
+
+### Module Not Found Error
+
+If you see `ModuleNotFoundError`, reinstall the package:
+
+```bash
+sudo /opt/binance-mcp-server/venv/bin/pip install -e /opt/binance-mcp-server/src
+```
+
+### Permission Errors
+
+```bash
+# Fix ownership
+sudo chown -R binance-mcp:binance-mcp /opt/binance-mcp-server
+sudo chown -R binance-mcp:binance-mcp /var/log/binance-mcp
+sudo chown binance-mcp:binance-mcp /etc/binance-mcp/binance-mcp.env
+sudo chmod 600 /etc/binance-mcp/binance-mcp.env
 ```
 
 ### Connection Refused
@@ -468,42 +506,6 @@ sudo ufw status
 
 # Test local connection
 curl http://localhost:8000/health
-```
-
-### Permission Errors
-
-```bash
-# Fix ownership
-sudo chown -R binance-mcp:binance-mcp /opt/binance-mcp-server
-sudo chown -R binance-mcp:binance-mcp /var/log/binance-mcp
-sudo chown binance-mcp:binance-mcp /etc/binance-mcp/binance-mcp.env
-sudo chmod 600 /etc/binance-mcp/binance-mcp.env
-```
-
-### API Errors
-
-```bash
-# Check API credentials
-sudo cat /etc/binance-mcp/binance-mcp.env
-
-# Test API connection manually
-curl -X GET "https://fapi.binance.com/fapi/v1/time"
-```
-
-## Updating the Service
-
-```bash
-# Stop the service
-sudo systemctl stop binance-mcp
-
-# Update the package
-sudo /opt/binance-mcp-server/venv/bin/pip install --upgrade binance-mcp-server
-
-# Start the service
-sudo systemctl start binance-mcp
-
-# Verify update
-sudo journalctl -u binance-mcp -n 20
 ```
 
 ## Uninstallation
@@ -527,7 +529,7 @@ sudo rm -rf /var/log/binance-mcp
 sudo userdel binance-mcp
 
 # Remove helper scripts
-sudo rm /usr/local/bin/binance-mcp-status
-sudo rm /usr/local/bin/binance-mcp-logs
-sudo rm /usr/local/bin/binance-mcp-health
+sudo rm -f /usr/local/bin/binance-mcp-status
+sudo rm -f /usr/local/bin/binance-mcp-logs
+sudo rm -f /usr/local/bin/binance-mcp-update
 ```
