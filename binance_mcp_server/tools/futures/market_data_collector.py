@@ -234,7 +234,12 @@ class MarketDataCollector:
             )
             
             if not success:
-                return False, None, data.get("message", "Failed to fetch orderbook")
+                # Handle both dict and string error responses
+                if isinstance(data, dict):
+                    error_msg = data.get("msg") or data.get("message") or str(data)
+                else:
+                    error_msg = str(data) if data else "Failed to fetch orderbook"
+                return False, None, error_msg
             
             snapshot = OrderBookSnapshot(
                 symbol=symbol.upper(),
@@ -282,7 +287,12 @@ class MarketDataCollector:
             )
             
             if not success:
-                return False, [], data.get("message", "Failed to fetch trades")
+                # Handle both dict and string error responses
+                if isinstance(data, dict):
+                    error_msg = data.get("msg") or data.get("message") or str(data)
+                else:
+                    error_msg = str(data) if data else "Failed to fetch trades"
+                return False, [], error_msg
             
             trades = [
                 TradeRecord(
@@ -348,7 +358,12 @@ class MarketDataCollector:
                 )
                 
                 if not success:
-                    return False, all_trades, data.get("message", "Failed to fetch historical trades")
+                    # Handle both dict and string error responses
+                    if isinstance(data, dict):
+                        error_msg = data.get("msg") or data.get("message") or str(data)
+                    else:
+                        error_msg = str(data) if data else "Failed to fetch historical trades"
+                    return False, all_trades, error_msg
                 
                 if not data:
                     break
@@ -414,7 +429,12 @@ class MarketDataCollector:
             )
             
             if not success:
-                return False, None, data.get("message", "Failed to fetch mark price")
+                # Handle both dict and string error responses
+                if isinstance(data, dict):
+                    error_msg = data.get("msg") or data.get("message") or str(data)
+                else:
+                    error_msg = str(data) if data else "Failed to fetch mark price"
+                return False, None, error_msg
             
             info = MarkPriceInfo(
                 symbol=data["symbol"],

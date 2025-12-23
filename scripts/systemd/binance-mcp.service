@@ -1,0 +1,49 @@
+[Unit]
+Description=Binance MCP Server (SSE Transport)
+Documentation=https://github.com/AnalyticAce/binance-mcp-server
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=binance-mcp
+Group=binance-mcp
+WorkingDirectory=/opt/binance-mcp-server/src
+
+# Load environment variables from config file
+EnvironmentFile=/etc/binance-mcp/binance-mcp.env
+
+# Start the MCP server using python -m (source installation)
+ExecStart=/opt/binance-mcp-server/venv/bin/python -m binance_mcp_server.cli \
+    --transport ${MCP_TRANSPORT} \
+    --host ${MCP_HOST} \
+    --port ${MCP_PORT}
+
+# Automatic restart on failure
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Allow write access for editable install
+ReadWritePaths=/opt/binance-mcp-server/src
+
+# Logging to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=binance-mcp
+
+[Install]
+WantedBy=multi-user.target
