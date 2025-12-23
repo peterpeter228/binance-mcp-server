@@ -287,7 +287,7 @@ def with_retry_and_cache(
 
 
 def make_api_call_with_backoff(
-    api_func: Callable[[], Tuple[bool, Any]],
+    api_func: Callable[[], Any],
     retry_config: Optional[RetryConfig] = None,
     operation_name: str = "API call"
 ) -> Tuple[bool, Any, Optional[str]]:
@@ -295,7 +295,9 @@ def make_api_call_with_backoff(
     Execute an API call with exponential backoff on rate limit errors.
     
     Args:
-        api_func: Function that makes the API call, returns (success, data)
+        api_func: Function that makes the API call, returns either:
+                  - (success, data) tuple
+                  - (success, data, error) tuple
         retry_config: Optional retry configuration
         operation_name: Name for logging
         
@@ -309,15 +311,46 @@ def make_api_call_with_backoff(
     
     for attempt in range(retry_config.max_retries + 1):
         try:
-            success, data = api_func()
+            result = api_func()
+            
+            # Handle both 2-tuple and 3-tuple returns
+            if isinstance(result, tuple):
+                if len(result) == 2:
+                    success, data = result
+                    error_from_func = None
+                elif len(result) >= 3:
+                    success, data, error_from_func = result[0], result[1], result[2]
+                else:
+                    # Single value or unexpected format
+                    success = bool(result[0]) if result else False
+                    data = result[1] if len(result) > 1 else None
+                    error_from_func = None
+            else:
+                # Not a tuple - treat as data
+                success = result is not None
+                data = result
+                error_from_func = None
             
             if success:
                 return True, data, None
             
-            # Check for rate limit error
-            error_code = data.get("code") if isinstance(data, dict) else None
+            # Check for rate limit error in data or error_from_func
+            error_code = None
+            error_msg = error_from_func
             
-            if error_code in retry_config.retry_codes:
+            if isinstance(data, dict):
+                error_code = data.get("code")
+                if not error_msg:
+                    error_msg = data.get("message", str(data))
+            
+            # Check if error message indicates rate limit
+            is_rate_limit = error_code in retry_config.retry_codes
+            if not is_rate_limit and error_msg:
+                # Check for rate limit keywords in error message
+                rate_limit_keywords = ["rate limit", "too many requests", "429", "-1015"]
+                is_rate_limit = any(kw.lower() in str(error_msg).lower() for kw in rate_limit_keywords)
+            
+            if is_rate_limit:
                 if attempt < retry_config.max_retries:
                     delay = calculate_backoff_delay(
                         attempt,
@@ -333,8 +366,9 @@ def make_api_call_with_backoff(
                     time.sleep(delay)
                     continue
             
-            # Non-retryable error
-            error_msg = data.get("message", str(data)) if isinstance(data, dict) else str(data)
+            # Non-retryable error or rate limit exhausted
+            if not error_msg:
+                error_msg = str(data) if data else "Unknown error"
             return False, data, error_msg
             
         except Exception as e:
