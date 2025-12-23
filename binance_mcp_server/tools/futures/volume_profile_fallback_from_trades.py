@@ -399,6 +399,10 @@ def volume_profile_fallback_from_trades(
     Use when volume_profile_levels_futures hits rate limits or is unavailable.
     Provides simplified but reliable VP levels.
     
+    IMPORTANT: This tool first tries to use buffered trade data to avoid
+    hitting API rate limits. If buffer is insufficient, it will fetch from API.
+    For best results with no API calls, use volume_profile_levels_futures_ws instead.
+    
     Args:
         symbol: Trading symbol (BTCUSDT or ETHUSDT)
         lookback_minutes: Time window in minutes (max 360)
@@ -446,31 +450,96 @@ def volume_profile_fallback_from_trades(
     
     # Get market data collector
     collector = get_market_data_collector()
-    retry_config = RetryConfig(max_retries=3, base_delay_ms=1000)
     
     # Calculate time window
     lookback_seconds = lookback_minutes * 60
     start_time_ms = ts_ms - (lookback_seconds * 1000)
     
-    # Fetch trades with retry
-    success, trades_result, trades_error = make_api_call_with_backoff(
-        lambda: collector.fetch_historical_trades(
-            symbol=normalized_symbol,
-            start_time_ms=start_time_ms,
-            limit=min(max_trades, 1000)  # API limit per call
-        ),
-        retry_config,
-        "fetch_historical_trades"
-    )
+    # STRATEGY: First try to use buffered trades to avoid API rate limits
+    # This is especially important as a "fallback" tool
+    trades: List[TradeRecord] = []
+    data_source = "buffer"
     
-    if not success:
-        return {
-            "success": False,
-            "ts_ms": ts_ms,
-            "error": {"type": "data_error", "message": trades_error or "Failed to fetch trades"}
-        }
+    # Step 1: Try to get trades from the existing buffer first
+    buffered_trades = collector.get_buffered_trades(normalized_symbol, lookback_seconds)
     
-    trades: List[TradeRecord] = trades_result if trades_result else []
+    if len(buffered_trades) >= 100:
+        # Buffer has enough data, use it directly
+        trades = buffered_trades[:max_trades]
+        data_source = "buffer"
+        logger.info(f"Using {len(trades)} trades from buffer for {normalized_symbol}")
+    else:
+        # Step 2: Try to get from WebSocket buffer (if available)
+        try:
+            from binance_mcp_server.tools.futures.ws_trade_buffer import get_ws_trade_buffer_manager
+            ws_manager = get_ws_trade_buffer_manager()
+            if ws_manager.is_subscribed(normalized_symbol):
+                ws_trades_raw = ws_manager.get_trades(normalized_symbol, lookback_seconds)
+                if len(ws_trades_raw) >= 100:
+                    # Convert WS trades to TradeRecord format
+                    trades = [
+                        TradeRecord(
+                            agg_trade_id=t.agg_trade_id,
+                            price=t.price,
+                            qty=t.qty,
+                            first_trade_id=t.agg_trade_id,
+                            last_trade_id=t.agg_trade_id,
+                            timestamp_ms=t.timestamp_ms,
+                            is_buyer_maker=t.is_buyer_maker
+                        )
+                        for t in ws_trades_raw[:max_trades]
+                    ]
+                    data_source = "websocket_buffer"
+                    logger.info(f"Using {len(trades)} trades from WebSocket buffer for {normalized_symbol}")
+        except ImportError:
+            pass  # WS module not available
+        except Exception as e:
+            logger.debug(f"Could not get WS trades: {e}")
+        
+        # Step 3: Only fetch from API if buffer is insufficient
+        if len(trades) < 100:
+            # Use longer retry delays for this fallback tool since we're likely already rate limited
+            retry_config = RetryConfig(
+                max_retries=2,  # Fewer retries to fail fast
+                base_delay_ms=3000,  # Longer base delay (3s)
+                max_delay_ms=30000,  # Max 30s delay
+                jitter_factor=0.5
+            )
+            
+            success, trades_result, trades_error = make_api_call_with_backoff(
+                lambda: collector.fetch_historical_trades(
+                    symbol=normalized_symbol,
+                    start_time_ms=start_time_ms,
+                    limit=min(max_trades, 1000)  # API limit per call
+                ),
+                retry_config,
+                "fetch_historical_trades"
+            )
+            
+            if not success:
+                # Check if it's a rate limit error
+                is_rate_limit = trades_error and any(
+                    kw.lower() in trades_error.lower() 
+                    for kw in ["rate limit", "too many requests", "429", "2400"]
+                )
+                
+                error_msg = trades_error or "Failed to fetch trades"
+                if is_rate_limit:
+                    error_msg = (
+                        f"{error_msg}. "
+                        "Recommendation: Use volume_profile_levels_futures_ws instead "
+                        "(WebSocket-based, no REST API calls)."
+                    )
+                
+                return {
+                    "success": False,
+                    "ts_ms": ts_ms,
+                    "error": {"type": "data_error", "message": error_msg},
+                    "quality_flags": ["rate_limit_hit"] if is_rate_limit else ["api_error"]
+                }
+            
+            trades = trades_result if trades_result else []
+            data_source = "api"
     
     quality_flags = []
     notes = []
@@ -538,6 +607,13 @@ def volume_profile_fallback_from_trades(
     confidence = round(min(1.0, confidence), 2)
     
     # Generate notes
+    if data_source == "buffer":
+        notes.append("Data from trade buffer (no API call)")
+    elif data_source == "websocket_buffer":
+        notes.append("Data from WebSocket buffer (no API call)")
+    else:
+        notes.append("Data from REST API")
+    
     if vpoc:
         notes.append(f"POC at {vpoc}")
     if vah and val:
@@ -559,6 +635,7 @@ def volume_profile_fallback_from_trades(
             "trade_count": len(trades),
             "actual_minutes": round(actual_minutes, 1),
             "bin_count": len(profile),
+            "data_source": data_source,
             "price_range": {
                 "low": round(price_min, 2),
                 "high": round(price_max, 2)
