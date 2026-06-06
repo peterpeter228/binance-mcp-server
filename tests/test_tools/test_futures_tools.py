@@ -304,7 +304,7 @@ class TestFuturesConfig:
         """Test testnet base URL when enabled."""
         with patch.dict('os.environ', {'BINANCE_TESTNET': 'true', 'BINANCE_API_KEY': 'test', 'BINANCE_API_SECRET': 'test'}):
             config = FuturesConfig()
-            assert config.base_url == "https://testnet.binancefuture.com"
+            assert config.base_url == "https://demo-fapi.binance.com"
     
     def test_signature_creation(self):
         """Test HMAC signature creation."""

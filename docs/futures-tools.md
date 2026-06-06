@@ -35,7 +35,7 @@ export BINANCE_RECV_WINDOW="5000"       # Receive window in ms (default: 5000)
 | Environment | Base URL |
 |-------------|----------|
 | Production | `https://fapi.binance.com` |
-| Testnet | `https://testnet.binancefuture.com` |
+| Testnet | `https://demo-fapi.binance.com` |
 
 ---
 
