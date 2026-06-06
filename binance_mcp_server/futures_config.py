@@ -29,7 +29,7 @@ class FuturesConfig:
     FUTURES_WS_URL = "wss://fstream.binance.com"
     
     # Testnet URLs
-    FUTURES_TESTNET_BASE_URL = "https://testnet.binancefuture.com"
+    FUTURES_TESTNET_BASE_URL = "https://demo-fapi.binance.com"
     FUTURES_TESTNET_WS_URL = "wss://stream.binancefuture.com"
     
     def __init__(self):
